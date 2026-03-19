@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=DM+Serif+Display:ital@0;1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design Tokens ── */
+:root {
+  --navy-dark:   #0f1c35;
+  --navy-mid:    #1e3460;
+  --blue-brand:  #2b4a8c;
+  --blue-bright: #3b63b8;
+  --gold:        #f0b429;
+  --gold-light:  #fcd34d;
+  --sidebar-w:   240px;
+}
+
+/* ── Base ── */
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+/* ── Sidebar layout ── */
+.sidebar-fixed {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: var(--sidebar-w);
+  z-index: 100;
+  overflow-y: auto;
+  background: var(--navy-dark);
+  display: flex;
+  flex-direction: column;
+}
+
+.main-offset {
+  margin-left: var(--sidebar-w);
+  min-height: 100vh;
+}
+
+/* ── Login gradient ── */
+.login-gradient {
+  background: linear-gradient(135deg, var(--navy-dark) 0%, var(--navy-mid) 50%, var(--blue-brand) 100%);
+}
+
+/* ── Hero gradient ── */
+.hero-gradient {
+  background: linear-gradient(120deg, var(--navy-dark) 0%, var(--navy-mid) 60%, var(--blue-brand) 100%);
+}
+
+/* ── Org chart connector ── */
+.org-connector-v {
+  width: 2px;
+  height: 32px;
+  background: #cbd5e1;
+  margin: 0 auto;
+}
+
+/* ── Animation ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fadeUp 0.25s ease; }
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }

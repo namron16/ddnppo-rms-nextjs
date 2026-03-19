@@ -1,0 +1,17 @@
+// components/ui/index.ts
+// Barrel export — import any UI primitive from '@/components/ui'
+
+export { AlertWarning }   from './AlertWarning'
+export { Avatar }         from './Avatar'
+export { Badge }          from './Badge'
+export { Button }         from './Button'
+export { ConfirmDialog }  from './ConfirmDialog'
+export { EmptyState }     from './EmptyState'
+export { LoadingSpinner } from './LoadingSpinner'
+export { Modal }          from './Modal'
+export { OrgChart }       from './OrgChart'
+export { PageHeader }     from './PageHeader'
+export { SearchInput }    from './SearchInput'
+export { StatCard }       from './StatCard'
+export { Toolbar, ToolbarSelect } from './Toolbar'
+export { ToastProvider, useToast } from './Toast'
