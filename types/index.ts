@@ -140,5 +140,15 @@ export interface Personnel201 {
   lastUpdated: string
   initials: string
   avatarColor: string
+  /** Extra profile fields shown in resume header */
+  address?: string
+  contactNo?: string
+  dateOfRetirement?: string
+  status?: string
+  firearmSerialNo?: string
+  pagIbigNo?: string
+  philHealthNo?: string
+  tin?: string
+  payslipAccountNo?: string
   documents: Doc201Item[]
 }

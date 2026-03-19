@@ -7,23 +7,29 @@ import { useState, useCallback, useMemo } from 'react'
 // ════════════════════════════════════════════
 // useSearch
 // Filters an array by a search query string
-// against a list of keys from each item.
+// against a list of string-valued keys.
+//
+// The keys array should only contain keys whose
+// values are strings (name, rank, unit, etc.).
+// Non-string values are skipped silently.
 //
 // Usage:
 //   const { query, setQuery, filtered } = useSearch(items, ['title', 'author'])
 // ════════════════════════════════════════════
-export function useSearch<T extends Record<string, unknown>>(
+export function useSearch<T>(
   items: T[],
-  keys: (keyof T)[],
+  keys: Array<keyof T>,
 ) {
   const [query, setQuery] = useState('')
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return items
-    const q = query.toLowerCase()
+    const q = query.trim().toLowerCase()
+    if (!q) return items
     return items.filter(item =>
       keys.some(key => {
-        const val = item[key]
+        // Cast to unknown first, then check — satisfies strict TS without
+        // requiring T to extend Record<string, unknown>
+        const val: unknown = item[key]
         return typeof val === 'string' && val.toLowerCase().includes(q)
       })
     )
@@ -41,15 +47,15 @@ export function useSearch<T extends Record<string, unknown>>(
 // ════════════════════════════════════════════
 export function useModal(initialOpen = false) {
   const [isOpen, setOpen] = useState(initialOpen)
-  const open  = useCallback(() => setOpen(true),  [])
-  const close = useCallback(() => setOpen(false), [])
-  const toggle= useCallback(() => setOpen(v => !v), [])
+  const open   = useCallback(() => setOpen(true),    [])
+  const close  = useCallback(() => setOpen(false),   [])
+  const toggle = useCallback(() => setOpen(v => !v), [])
   return { isOpen, open, close, toggle }
 }
 
 // ════════════════════════════════════════════
 // useDisclosure
-// Like useModal but with a generic payload.
+// Like useModal but carries a typed payload.
 // Useful when a modal needs to know which item
 // it was opened for.
 //
@@ -64,7 +70,7 @@ export function useDisclosure<T = undefined>() {
   })
 
   const open  = useCallback((payload?: T) => setState({ isOpen: true,  payload }), [])
-  const close = useCallback(()           => setState({ isOpen: false, payload: undefined }), [])
+  const close = useCallback(()            => setState({ isOpen: false, payload: undefined }), [])
 
   return { isOpen: state.isOpen, payload: state.payload, open, close }
 }

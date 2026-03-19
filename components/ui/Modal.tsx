@@ -44,13 +44,13 @@ export function Modal({ open, onClose, title, children, width = 'max-w-2xl' }: M
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-7 py-6 border-b border-slate-100">
-          <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+        <div className="relative flex items-center justify-center px-6 py-1.5 border-b border-slate-100">
+          <h2 className="text-sm font-semibold text-slate-600 tracking-wide">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 transition p-1 rounded-lg hover:bg-slate-100"
+            className="absolute right-4 text-slate-400 hover:text-slate-700 transition p-1 rounded-lg hover:bg-slate-100"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
