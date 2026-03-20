@@ -19,7 +19,7 @@ const DOC_NAV: NavItem[] = [
   { label: 'Special Orders',   icon: '📋', href: '/admin/special-orders' },
   { label: '201 Documents',   icon: '📔', href: '/admin/personnel' },
   { label: 'Classified Docs',icon: '🔒', href: '/admin/confidential' },
-  { label: 'Directory',        icon: '🏛️', href: '/admin/directory' },
+  { label: 'Organization',        icon: '🏛️', href: '/admin/directory' },
   { label: 'E-Library',          icon: '📚', href: '/admin/library' },
 ]
 

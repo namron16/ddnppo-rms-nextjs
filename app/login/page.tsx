@@ -38,15 +38,15 @@ export default function LoginPage() {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 mb-9">
             <div className="w-2 h-2 bg-yellow-400 rounded-full" />
-            <span className="text-white text-xs font-semibold tracking-wide">PNP – DAVAO DEL NORTE PPO</span>
+            <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II - Davao Norte Police PRovincial Office</span>
           </div>
 
           <h1 className="font-display text-5xl text-white leading-tight mb-4">
             Records Management<br />System
           </h1>
           <p className="text-white/60 text-[15px] leading-relaxed mb-12 max-w-sm">
-            Secure, centralized document management for Davao del Norte
-            Provincial Police Office personnel.
+            Secure, centralized document management for Davao Del Norte
+            Provincial Police Office.
           </p>
 
           <ul className="space-y-3.5">

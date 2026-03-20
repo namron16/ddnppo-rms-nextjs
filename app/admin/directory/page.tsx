@@ -16,7 +16,7 @@ export default function DirectoryPage() {
           {/* Card header */}
           <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
             <div>
-              <span className="text-base font-bold text-slate-800">DDNPPO Organizational Chart</span>
+              <span className="text-base font-bold text-slate-800">DNPPO Hierarchy</span>
               <span className="ml-2 text-xs text-slate-400 font-normal">As of 2024</span>
             </div>
             <div className="flex gap-2">

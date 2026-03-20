@@ -30,12 +30,12 @@ const CARDS: Array<{
   desc: string
   badge?: string
 }> = [
-  { key: 'master',      icon: '📁', title: 'Master Documents', desc: 'Regional, provincial & station documents', badge: '7 DOCS' },
-  { key: 'so',          icon: '📋', title: 'Special Orders',   desc: 'Designation, transfer & promotion orders', badge: '3 DOCS' },
-  { key: 'journal',     icon: '📔', title: 'Daily Journals',   desc: 'Memos, reports, activity logs' },
-  { key: 'confidential',icon: '🔒', title: 'Confidential Docs',desc: 'Password-protected classified documents' },
-  { key: 'library',     icon: '📚', title: 'Library',          desc: 'Manuals, guidelines, templates' },
-  { key: 'directory',   icon: '🏛️', title: 'Directory',        desc: 'Org chart & personnel contacts' },
+  { key: 'master',       icon: '📁', title: 'Master Documents',       desc: 'Regional, provincial & station documents',                       badge: '7 DOCS' },
+  { key: 'so',           icon: '📋', title: 'Administrative Orders',  desc: 'Designation, transfer, special & letter orders',                 badge: '3 DOCS' },
+  { key: 'journal',      icon: '📂', title: '201 File',               desc: 'Police personnel file' },
+  { key: 'confidential', icon: '🔒', title: 'Classified Documents',   desc: 'Password-protected classified documents' },
+  { key: 'library',      icon: '📚', title: 'E-Library',              desc: 'Memorandum circulars, SOPs, directives, relevant laws, rules & regulations' },
+  { key: 'directory',    icon: '🏛️', title: 'Organization',          desc: 'Organizational structure & directory' },
 ]
 
 // ── Flatten master docs for modal list ────────────
@@ -164,8 +164,8 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Special Orders */}
-      <Modal open={openModal === 'so'} onClose={() => setOpenModal(null)} title="Special Orders" width="max-w-xl">
+      {/* Administrative Orders */}
+      <Modal open={openModal === 'so'} onClose={() => setOpenModal(null)} title="Administrative Orders" width="max-w-xl">
         <div className="p-6 space-y-3">
           {SPECIAL_ORDERS.map(so => (
             <div key={so.id} className="flex items-center gap-3 px-4 py-3.5 border-[1.5px] border-slate-200 rounded-xl hover:border-blue-200 transition">
@@ -178,8 +178,8 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Daily Journals */}
-      <Modal open={openModal === 'journal'} onClose={() => setOpenModal(null)} title="Daily Journals & Memos" width="max-w-xl">
+      {/* 201 File */}
+      <Modal open={openModal === 'journal'} onClose={() => setOpenModal(null)} title="201 File — Police Personnel File" width="max-w-xl">
         <div className="p-6 space-y-3">
           {JOURNAL_ENTRIES.map(entry => (
             <div key={entry.id} className="flex items-center gap-3 px-4 py-3.5 border-[1.5px] border-slate-200 rounded-xl hover:border-blue-200 transition">
@@ -192,8 +192,8 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Confidential Docs */}
-      <Modal open={openModal === 'confidential'} onClose={() => setOpenModal(null)} title="Confidential Documents" width="max-w-2xl">
+      {/* Classified Documents */}
+      <Modal open={openModal === 'confidential'} onClose={() => setOpenModal(null)} title="Classified Documents" width="max-w-2xl">
         <div className="px-7 pt-5">
           <AlertWarning message="Confidential documents require per-document password authentication. All access is logged." />
         </div>
@@ -226,10 +226,17 @@ export default function DashboardPage() {
         <div className="h-4" />
       </Modal>
 
-      {/* Library */}
-      <Modal open={openModal === 'library'} onClose={() => setOpenModal(null)} title="Document Library" width="max-w-2xl">
+      {/* E-Library */}
+      <Modal open={openModal === 'library'} onClose={() => setOpenModal(null)} title="E-Library" width="max-w-2xl">
         <Toolbar placeholder="Search library…">
-          <ToolbarSelect><option>All Categories</option><option>Manual</option><option>Guideline</option><option>Template</option></ToolbarSelect>
+          <ToolbarSelect>
+            <option>All Categories</option>
+            <option>Memorandum Circulars</option>
+            <option>SOPs</option>
+            <option>Directives</option>
+            <option>Relevant Laws</option>
+            <option>Rules &amp; Regulations</option>
+          </ToolbarSelect>
         </Toolbar>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
@@ -257,8 +264,8 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Directory */}
-      <Modal open={openModal === 'directory'} onClose={() => setOpenModal(null)} title="Personnel Directory" width="max-w-2xl">
+      {/* Organization */}
+      <Modal open={openModal === 'directory'} onClose={() => setOpenModal(null)} title="Organization — Organizational Structure & Directory" width="max-w-2xl">
         <OrgChart root={ORG_CHART} />
       </Modal>
 
