@@ -1,8 +1,5 @@
 // lib/data.ts
-// ─────────────────────────────────────────────
-// All mock/seed data for the DDNPPO RMS prototype.
-// In production, replace with API calls.
-
+import { supabase } from './supabase'
 import type {
   User, MasterDocument, SpecialOrder,
   JournalEntry, ConfidentialDoc, LibraryItem,
@@ -10,344 +7,198 @@ import type {
 } from '@/types'
 
 /* ════════════════════════════════════════════
-   USERS
+   USERS — kept for authentication only
 ════════════════════════════════════════════ */
 export const USERS: User[] = [
-  {
-    id: '1',
-    name: 'Ramon Dela Cruz',
-    email: 'rdelacruz@ddnppo.gov.ph',
-    role: 'admin',
-    initials: 'RD',
-    avatarColor: '#f0b429',
-  },
-  {
-    id: '2',
-    name: 'Ana Santos',
-    email: 'asantos@ddnppo.gov.ph',
-    role: 'officer',
-    initials: 'AS',
-    avatarColor: '#3b63b8',
-  },
-  {
-    id: '3',
-    name: 'Jose Reyes',
-    email: 'jreyes@ddnppo.gov.ph',
-    role: 'officer',
-    initials: 'JR',
-    avatarColor: '#8b5cf6',
-  },
+  { id: '1', name: 'Ramon Dela Cruz', email: 'rdelacruz@ddnppo.gov.ph', role: 'admin',   initials: 'RD', avatarColor: '#f0b429' },
+  { id: '2', name: 'Ana Santos',      email: 'asantos@ddnppo.gov.ph',   role: 'officer', initials: 'AS', avatarColor: '#3b63b8' },
+  { id: '3', name: 'Jose Reyes',      email: 'jreyes@ddnppo.gov.ph',    role: 'officer', initials: 'JR', avatarColor: '#8b5cf6' },
 ]
 
 /* ════════════════════════════════════════════
    MASTER DOCUMENTS
 ════════════════════════════════════════════ */
-export const MASTER_DOCUMENTS: MasterDocument[] = [
-  {
-    id: 'md-1',
-    title: 'RO XI General Circular No. 2024-01',
-    level: 'REGIONAL',
-    date: '2024-01-15',
-    type: 'PDF',
-    size: '0.8 MB',
-    tag: 'COMPLIANCE',
-    children: [
-      {
-        id: 'md-2',
-        title: 'DDNPPO Provincial Implementation Order 2024-01',
-        level: 'PROVINCIAL',
-        date: '2024-01-20',
-        type: 'PDF',
-        size: '1.2 MB',
-        tag: 'COMPLIANCE',
-        children: [
-          {
-            id: 'md-3',
-            title: 'Tagum City PS Compliance Order',
-            level: 'STATION',
-            date: '2024-01-25',
-            type: 'PDF',
-            size: '0.8 MB',
-            tag: 'COMPLIANCE',
-          },
-          {
-            id: 'md-4',
-            title: 'Panabo City PS Compliance Order',
-            level: 'STATION',
-            date: '2024-01-26',
-            type: 'PDF',
-            size: '0.7 MB',
-            tag: 'COMPLIANCE',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'md-5',
-    title: 'RO XI Memorandum Circular No. 2024-05',
-    level: 'REGIONAL',
-    date: '2024-02-03',
-    type: 'PDF',
-    size: '1.1 MB',
-    tag: 'REGIONAL',
-    children: [
-      {
-        id: 'md-6',
-        title: 'DDNPPO Compliance Report Q1 2024',
-        level: 'PROVINCIAL',
-        date: '2024-02-10',
-        type: 'PDF',
-        size: '2.1 MB',
-        tag: 'PROVINCIAL',
-      },
-    ],
-  },
-  {
-    id: 'md-7',
-    title: 'RO XI Directive on Community Policing 2024',
-    level: 'REGIONAL',
-    date: '2024-03-01',
-    type: 'PDF',
-    size: '0.9 MB',
-    tag: 'REGIONAL',
-  },
-]
+export async function getMasterDocuments(): Promise<(MasterDocument & { fileUrl?: string })[]> {
+  const { data, error } = await supabase
+    .from('master_documents').select('*').order('created_at', { ascending: true })
+  if (error) { console.error(error); return [] }
+  return (data ?? []).map(d => ({
+    id: d.id, title: d.title, level: d.level, type: d.type,
+    date: d.date, size: d.size, tag: d.tag, fileUrl: d.file_url ?? undefined,
+  }))
+}
+
+export async function addMasterDocument(doc: MasterDocument & { fileUrl?: string }): Promise<void> {
+  const { error } = await supabase.from('master_documents').insert({
+    id: doc.id, title: doc.title, level: doc.level, type: doc.type,
+    date: doc.date, size: doc.size, tag: doc.tag, file_url: doc.fileUrl ?? null,
+  })
+  if (error) console.error(error)
+}
+
+export async function updateMasterDocument(doc: MasterDocument & { fileUrl?: string }): Promise<void> {
+  const { error } = await supabase.from('master_documents')
+    .update({ title: doc.title, level: doc.level, type: doc.type, date: doc.date, tag: doc.tag })
+    .eq('id', doc.id)
+  if (error) console.error(error)
+}
+
+export async function deleteMasterDocument(id: string): Promise<void> {
+  const { error } = await supabase.from('master_documents').delete().eq('id', id)
+  if (error) console.error(error)
+}
 
 /* ════════════════════════════════════════════
    SPECIAL ORDERS
 ════════════════════════════════════════════ */
-export const SPECIAL_ORDERS: SpecialOrder[] = [
-  {
-    id: 'so-1',
-    reference: 'SO No. 2024-101',
-    subject: 'Designation of Officers – Q1',
-    date: '2024-01-10',
-    attachments: 3,
-    status: 'ACTIVE',
-  },
-  {
-    id: 'so-2',
-    reference: 'SO No. 2024-089',
-    subject: 'Transfer of Assignment – Tagum CPS',
-    date: '2024-01-05',
-    attachments: 1,
-    status: 'ACTIVE',
-  },
-  {
-    id: 'so-3',
-    reference: 'SO No. 2023-244',
-    subject: 'Promotion of Personnel – Dec 2023',
-    date: '2023-12-15',
-    attachments: 2,
-    status: 'ARCHIVED',
-  },
-]
+export async function getSpecialOrders(): Promise<(SpecialOrder & { fileUrl?: string })[]> {
+  const { data, error } = await supabase
+    .from('special_orders').select('*').order('created_at', { ascending: false })
+  if (error) { console.error(error); return [] }
+  return (data ?? []).map(d => ({
+    id: d.id, reference: d.reference, subject: d.subject,
+    date: d.date, attachments: d.attachments, status: d.status,
+    fileUrl: d.file_url ?? undefined,
+  }))
+}
 
-/* ════════════════════════════════════════════
-   DAILY JOURNALS
-════════════════════════════════════════════ */
-export const JOURNAL_ENTRIES: JournalEntry[] = [
-  {
-    id: 'j-1',
-    title: 'Daily Operations Update – 15 Mar',
-    type: 'MEMO',
-    author: 'P/Col. Dela Cruz',
-    date: '2024-03-15',
-  },
-  {
-    id: 'j-2',
-    title: 'Morning Formation Report',
-    type: 'REPORT',
-    author: 'P/Maj. Santos',
-    date: '2024-03-14',
-  },
-  {
-    id: 'j-3',
-    title: 'Crime Prevention Activity Log – 13 Mar',
-    type: 'LOG',
-    author: 'P/Insp. Reyes',
-    date: '2024-03-13',
-  },
-]
+export async function addSpecialOrder(so: SpecialOrder & { fileUrl?: string }): Promise<void> {
+  const { error } = await supabase.from('special_orders').insert({
+    id: so.id, reference: so.reference, subject: so.subject,
+    date: so.date, attachments: so.attachments, status: so.status,
+    file_url: so.fileUrl ?? null,
+  })
+  if (error) console.error(error)
+}
+
+export async function deleteSpecialOrder(id: string): Promise<void> {
+  const { error } = await supabase.from('special_orders').delete().eq('id', id)
+  if (error) console.error(error)
+}
 
 /* ════════════════════════════════════════════
    CONFIDENTIAL DOCUMENTS
 ════════════════════════════════════════════ */
-export const CONFIDENTIAL_DOCS: ConfidentialDoc[] = [
-  {
-    id: 'cd-1',
-    title: 'Intelligence Report Alpha-7',
-    classification: 'RESTRICTED',
-    date: '2024-03-10',
-    access: 'All w/ Password',
-  },
-  {
-    id: 'cd-2',
-    title: 'Personnel Investigation Report – Santos',
-    classification: 'CONFIDENTIAL',
-    date: '2024-02-28',
-    access: 'Admin Only',
-  },
-]
+export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUrl?: string; passwordHash?: string })[]> {
+  const { data, error } = await supabase
+    .from('confidential_docs').select('*').order('created_at', { ascending: false })
+  if (error) { console.error(error); return [] }
+  return (data ?? []).map(d => ({
+    id: d.id, title: d.title, classification: d.classification,
+    date: d.date, access: d.access,
+    fileUrl:      d.file_url      ?? undefined,
+    passwordHash: d.password_hash ?? undefined,
+  }))
+}
+
+export async function addConfidentialDoc(
+  doc: ConfidentialDoc & { fileUrl?: string; passwordHash?: string }
+): Promise<void> {
+  const { error } = await supabase.from('confidential_docs').insert({
+    id: doc.id, title: doc.title, classification: doc.classification,
+    date: doc.date, access: doc.access,
+    file_url:      doc.fileUrl      ?? null,
+    password_hash: doc.passwordHash ?? null,
+  })
+  if (error) console.error(error)
+}
+
+export async function deleteConfidentialDoc(id: string): Promise<void> {
+  const { error } = await supabase.from('confidential_docs').delete().eq('id', id)
+  if (error) console.error(error)
+}
 
 /* ════════════════════════════════════════════
-   LIBRARY
+   LIBRARY ITEMS
 ════════════════════════════════════════════ */
-export const LIBRARY_ITEMS: LibraryItem[] = [
-  {
-    id: 'lib-1',
-    title: 'PNP Patrol Manual 2023',
-    category: 'MANUAL',
-    size: '12.4 MB',
-    dateAdded: '2023-06-01',
-  },
-  {
-    id: 'lib-2',
-    title: 'Anti-VAWC Guidelines',
-    category: 'GUIDELINE',
-    size: '3.2 MB',
-    dateAdded: '2023-09-15',
-  },
-  {
-    id: 'lib-3',
-    title: 'Crime Prevention Templates Pack',
-    category: 'TEMPLATE',
-    size: '1.8 MB',
-    dateAdded: '2024-01-10',
-  },
-]
+export async function getLibraryItems(): Promise<LibraryItem[]> {
+  const { data, error } = await supabase
+    .from('library_items').select('*').order('created_at', { ascending: false })
+  if (error) { console.error(error); return [] }
+  return (data ?? []).map(d => ({
+    id: d.id, title: d.title, category: d.category, size: d.size, dateAdded: d.date_added,
+  }))
+}
+
+export async function addLibraryItem(item: LibraryItem): Promise<void> {
+  const { error } = await supabase.from('library_items').insert({
+    id: item.id, title: item.title, category: item.category,
+    size: item.size, date_added: item.dateAdded,
+  })
+  if (error) console.error(error)
+}
+
+export async function deleteLibraryItem(id: string): Promise<void> {
+  const { error } = await supabase.from('library_items').delete().eq('id', id)
+  if (error) console.error(error)
+}
 
 /* ════════════════════════════════════════════
    ACTIVITY LOGS
 ════════════════════════════════════════════ */
-export const ACTIVITY_LOGS: ActivityLog[] = [
-  {
-    id: 'log-1',
-    user: 'P/Maj. Ana Santos',
-    userInitials: 'PA',
-    userColor: '#3b82f6',
-    action: 'Viewed',
-    document: 'DDNPPO Provincial Implementation Order',
-    date: '2024-03-15',
-    time: '09:24 AM',
-    device: 'Desktop / Chrome',
-  },
-  {
-    id: 'log-2',
-    user: 'P/Insp. Jose Reyes',
-    userInitials: 'RJ',
-    userColor: '#8b5cf6',
-    action: 'Downloaded',
-    document: 'SO No. 2024-101',
-    date: '2024-03-15',
-    time: '08:55 AM',
-    device: 'Mobile / Safari',
-  },
-  {
-    id: 'log-3',
-    user: 'P/Maj. Ana Santos',
-    userInitials: 'PA',
-    userColor: '#3b82f6',
-    action: 'Forwarded',
-    document: 'Daily Operations Update',
-    date: '2024-03-14',
-    time: '11:03 AM',
-    device: 'Desktop / Chrome',
-  },
-  {
-    id: 'log-4',
-    user: 'P/Col. Ramon Dela Cruz',
-    userInitials: 'PR',
-    userColor: '#f0b429',
-    action: 'Viewed',
-    document: 'Intelligence Report Alpha-7',
-    date: '2024-03-13',
-    time: '02:15 PM',
-    device: 'Tablet / Edge',
-  },
-  {
-    id: 'log-5',
-    user: 'P/Insp. Jose Reyes',
-    userInitials: 'RJ',
-    userColor: '#8b5cf6',
-    action: 'Downloaded',
-    document: 'RO XI General Circular No. 2024-01',
-    date: '2024-03-12',
-    time: '10:20 AM',
-    device: 'Desktop / Firefox',
-  },
-]
+export async function getActivityLogs(): Promise<ActivityLog[]> {
+  const { data, error } = await supabase
+    .from('activity_logs').select('*').order('created_at', { ascending: false })
+  if (error) { console.error(error); return [] }
+  return (data ?? []).map(d => ({
+    id: d.id, user: d.user_name, userInitials: d.user_initials, userColor: d.user_color,
+    action: d.action, document: d.document, date: d.date, time: d.time, device: d.device,
+  }))
+}
+
+export async function addActivityLog(log: ActivityLog): Promise<void> {
+  const { error } = await supabase.from('activity_logs').insert({
+    id: log.id, user_name: log.user, user_initials: log.userInitials,
+    user_color: log.userColor, action: log.action, document: log.document,
+    date: log.date, time: log.time, device: log.device,
+  })
+  if (error) console.error(error)
+}
 
 /* ════════════════════════════════════════════
-   ORG CHART
+   ARCHIVED DOCUMENTS
+════════════════════════════════════════════ */
+export async function getArchivedDocs() {
+  const { data, error } = await supabase
+    .from('archived_docs').select('*').order('created_at', { ascending: false })
+  if (error) { console.error(error); return [] }
+  return data ?? []
+}
+
+export async function addArchivedDoc(item: {
+  id: string; title: string; type: string; archivedDate: string; archivedBy: string
+}): Promise<void> {
+  const { error } = await supabase.from('archived_docs').insert({
+    id: item.id, title: item.title, type: item.type,
+    archived_date: item.archivedDate, archived_by: item.archivedBy,
+  })
+  if (error) console.error(error)
+}
+
+export async function deleteArchivedDoc(id: string): Promise<void> {
+  const { error } = await supabase.from('archived_docs').delete().eq('id', id)
+  if (error) console.error(error)
+}
+
+export async function restoreArchivedDoc(id: string): Promise<void> {
+  const { error } = await supabase.from('archived_docs').delete().eq('id', id)
+  if (error) console.error(error)
+}
+
+/* ════════════════════════════════════════════
+   ORG CHART — placeholder
 ════════════════════════════════════════════ */
 export const ORG_CHART: OrgNode = {
-  id: 'org-1',
-  initials: 'RD',
-  rank: 'Police Colonel',
-  name: 'P/Col. Ramon Dela Cruz',
-  title: 'Provincial Director',
-  unit: 'DDNPPO',
-  color: '#f0b429',
-  children: [
-    {
-      id: 'org-2',
-      initials: 'SY',
-      rank: 'Police Captain',
-      name: 'P/Capt. Sara Yap',
-      title: 'PCADU Unit Chief',
-      unit: 'PCADU',
-      color: '#6366f1',
-      children: [
-        {
-          id: 'org-5',
-          initials: 'LT',
-          rank: 'Police Inspector',
-          name: 'P/Insp. Leo Tan',
-          title: 'PIO Officer',
-          unit: 'PCADU',
-          color: '#059669',
-        },
-        {
-          id: 'org-6',
-          initials: 'MR',
-          rank: 'Police Inspector',
-          name: 'P/Insp. Mia Reyes',
-          title: 'FJGAD Officer',
-          unit: 'PCADU',
-          color: '#d97706',
-        },
-      ],
-    },
-    {
-      id: 'org-3',
-      initials: 'JS',
-      rank: 'Police Captain',
-      name: 'P/Capt. Jun Santos',
-      title: 'PDMU Unit Chief',
-      unit: 'PDMU',
-      color: '#3b63b8',
-      children: [
-        {
-          id: 'org-7',
-          initials: 'AD',
-          rank: 'Police Inspector',
-          name: 'P/Insp. Ana Dela Cruz',
-          title: 'WCPD Officer',
-          unit: 'PDMU',
-          color: '#7c3aed',
-        },
-      ],
-    },
-    {
-      id: 'org-4',
-      initials: 'DL',
-      rank: 'Police Major',
-      name: 'P/Maj. Dan Lim',
-      title: 'PPPU Unit Chief',
-      unit: 'PPPU',
-      color: '#0891b2',
-    },
-  ],
+  id: 'org-root', initials: '--', rank: '', name: 'No Data',
+  title: 'Add personnel to populate the org chart', unit: '', color: '#94a3b8', children: [],
 }
+
+/* ════════════════════════════════════════════
+   LEGACY EXPORTS
+════════════════════════════════════════════ */
+export const MASTER_DOCUMENTS:  MasterDocument[]  = []
+export const SPECIAL_ORDERS:    SpecialOrder[]    = []
+export const JOURNAL_ENTRIES:   JournalEntry[]    = []
+export const CONFIDENTIAL_DOCS: ConfidentialDoc[] = []
+export const LIBRARY_ITEMS:     LibraryItem[]     = []
+export const ACTIVITY_LOGS:     ActivityLog[]     = []

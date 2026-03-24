@@ -34,7 +34,7 @@ const CARDS: Array<{
   { key: 'so',           icon: '📋', title: 'Administrative Orders',  desc: 'Designation, transfer, special & letter orders',                 badge: '3 DOCS' },
   { key: 'journal',      icon: '📂', title: '201 File',               desc: 'Police personnel file' },
   { key: 'confidential', icon: '🔒', title: 'Classified Documents',   desc: 'Password-protected classified documents' },
-  { key: 'library',      icon: '📚', title: 'E-Library',              desc: 'Memorandum circulars, SOPs, directives, relevant laws, rules & regulations' },
+  { key: 'library',      icon: '📚', title: 'e-Library',              desc: 'Memorandum circulars, SOPs, directives, relevant laws, rules & regulations' },
   { key: 'directory',    icon: '🏛️', title: 'Organization',          desc: 'Organizational structure & directory' },
 ]
 

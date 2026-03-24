@@ -8,13 +8,20 @@ import { useState } from 'react'
 import { Modal }  from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import { MasterDocument } from '@/types'
+import { SpecialOrder } from '@/types'
+
+type SOWithUrl = SpecialOrder & { fileUrl?: string }
+
 
 interface AddDocumentModalProps {
   open: boolean
-  onClose: () => void
+  onClose: () => void,
+  onAdd?:(newSO: SOWithUrl) => Promise<void>,
+
 }
 
-export function AddDocumentModal({ open, onClose }: AddDocumentModalProps) {
+export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps) {
   const { toast } = useToast()
   const [form, setForm] = useState({
     title: '',

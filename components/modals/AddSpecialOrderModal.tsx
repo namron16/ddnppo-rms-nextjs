@@ -7,8 +7,12 @@ import { useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import {MasterDocument} from '@/types'
 
-interface Props { open: boolean; onClose: () => void }
+type DocWithUrl = MasterDocument & { fileUrl?: string }
+
+interface Props { open: boolean; onClose: () => void, onAdd?: (newSO:DocWithUrl
+) => Promise<void> }
 
 export function AddSpecialOrderModal({ open, onClose }: Props) {
   const { toast } = useToast()

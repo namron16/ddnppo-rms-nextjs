@@ -26,7 +26,7 @@ export default function LibraryPage() {
 
   return (
     <>
-      <PageHeader title="E-Library" />
+      <PageHeader title="e-Library" />
 
       <div className="p-8">
         <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden">
