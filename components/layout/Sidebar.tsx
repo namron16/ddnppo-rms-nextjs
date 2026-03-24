@@ -16,11 +16,11 @@ interface NavItem {
 
 const DOC_NAV: NavItem[] = [
   { label: 'Master Documents', icon: '📁', href: '/admin/master' },
-  { label: 'Special Orders',   icon: '📋', href: '/admin/special-orders' },
-  { label: '201 Documents',   icon: '📔', href: '/admin/personnel' },
-  { label: 'Classified Docs',icon: '🔒', href: '/admin/confidential' },
-  { label: 'Organization',        icon: '🏛️', href: '/admin/directory' },
-  { label: 'E-Library',          icon: '📚', href: '/admin/library' },
+  { label: 'Admin Orders',   icon: '📋', href: '/admin/admin-orders' },
+  { label: '201 Files',   icon: '📔', href: '/admin/personnel' },
+  { label: 'Classified Documents',icon: '🔒', href: '/admin/classified-docs' },
+  { label: 'Organization',        icon: '🏛️', href: '/admin/organization' },
+  { label: 'e-Library',          icon: '📚', href: '/admin/e-library' },
 ]
 
 const ADMIN_NAV: NavItem[] = [
