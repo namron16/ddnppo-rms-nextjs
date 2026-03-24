@@ -1,63 +1,34 @@
 // lib/data201.ts
-// ─────────────────────────────────────────────
-// Seed data for Personnel 201 Files.
-// Based on the PNP DPRM "Checklist in the Updating
-// of Records — Police Personal File (Database)" form.
-//
-// Checklist items (A–U):
-//  A  Updated PDS (DPRM Form) with latest 2x2 ID in Type A GOA Uniform
-//  B  Birth Certificate, Marriage Contract, Birth Certificates of all children
-//  C  College Diploma, SO, Transcript of Records and CAV, School Records or CAV
-//  D  All Mandatory Training with Diploma, Final Order of Merits, and Declaration of Graduates
-//  E  All Specialized Training/Seminars Attended (Certificate of Graduation/Attendance)
-//  F  All Eligibilities (Highest/Appropriate)
-//  G  All Attested Appointment/Special Orders (Temp/Perm)
-//  H  Order of Assignment, Designation/Detail
-//  I  Service Records (indicate Longevity and RCA Orders)
-//  J  Promotion Orders/Demotion (include Absorption Order and Appointments)
-//  K  Awards and Decorations and Commendations
-//  L  Firearms Records (Property Accountability Receipt P.A.R)
-//  M  Latest Medical Records
-//  N  Cases/Offenses
-//  O  Leave Records
-//  P  All RCA/Longevity Pay Orders
-//  Q  Latest Per FM Previous Unit
-//  R  Statement of Assets, Liabilities & Networth (SALN)
-//  S  Individual Income Tax Return (ITR)
-//  T  Photocopy of Tax Identification Card (TIN)
-//  U  1 PC Latest 2x2 ID Picture in GOA Type A Uniform
+import { supabase } from './supabase'
+import type { Personnel201, Doc201Item, Doc201Status } from '@/types'
 
-import type { Personnel201, Doc201Item } from '@/types'
-
-// ── Shared checklist template ─────────────────
-// Returns the standard 21-item 201 checklist
-// pre-filled with MISSING status for a new record.
+// ── Checklist template ────────────────────────
 function blankChecklist(): Omit<Doc201Item, 'id'>[] {
   return [
-    { category: 'PERSONAL_DATA',  label: 'Updated PDS (DPRM Form)',                          sublabel: 'With latest 2x2 ID in Type A GOA Uniform',      status: 'MISSING',     dateUpdated: '' },
-    { category: 'CIVIL_DOCUMENTS',label: 'Birth Certificate',                                 sublabel: 'PSA copy',                                       status: 'MISSING',     dateUpdated: '' },
-    { category: 'CIVIL_DOCUMENTS',label: 'Marriage Contract',                                 sublabel: 'PSA copy (if applicable)',                        status: 'MISSING',     dateUpdated: '' },
-    { category: 'CIVIL_DOCUMENTS',label: 'Birth Certificates of all Children',                sublabel: 'PSA copy',                                       status: 'MISSING',     dateUpdated: '' },
-    { category: 'ACADEMIC',       label: 'College Diploma',                                                                                               status: 'MISSING',     dateUpdated: '' },
-    { category: 'ACADEMIC',       label: 'Transcript of Records and CAV',                     sublabel: 'School Records or CAV',                          status: 'MISSING',     dateUpdated: '' },
+    { category: 'PERSONAL_DATA',  label: 'Updated PDS (DPRM Form)',                          sublabel: 'With latest 2x2 ID in Type A GOA Uniform',      status: 'MISSING', dateUpdated: '' },
+    { category: 'CIVIL_DOCUMENTS',label: 'Birth Certificate',                                 sublabel: 'PSA copy',                                       status: 'MISSING', dateUpdated: '' },
+    { category: 'CIVIL_DOCUMENTS',label: 'Marriage Contract',                                 sublabel: 'PSA copy (if applicable)',                        status: 'MISSING', dateUpdated: '' },
+    { category: 'CIVIL_DOCUMENTS',label: 'Birth Certificates of all Children',                sublabel: 'PSA copy',                                       status: 'MISSING', dateUpdated: '' },
+    { category: 'ACADEMIC',       label: 'College Diploma',                                                                                               status: 'MISSING', dateUpdated: '' },
+    { category: 'ACADEMIC',       label: 'Transcript of Records and CAV',                     sublabel: 'School Records or CAV',                          status: 'MISSING', dateUpdated: '' },
     { category: 'TRAINING',       label: 'Mandatory Training Documents',                      sublabel: 'Diploma, Final Order of Merits, Declaration of Graduates', status: 'MISSING', dateUpdated: '' },
-    { category: 'TRAINING',       label: 'Specialized Training / Seminars Attended',          sublabel: 'Certificate of Graduation/Attendance',           status: 'MISSING',     dateUpdated: '' },
-    { category: 'ELIGIBILITY',    label: 'Eligibilities',                                     sublabel: 'Highest/Appropriate — attested copies',          status: 'MISSING',     dateUpdated: '' },
-    { category: 'SPECIAL_ORDERS', label: 'Attested Appointment / Special Orders',             sublabel: 'Temp/Perm — attested and approved',              status: 'MISSING',     dateUpdated: '' },
-    { category: 'ASSIGNMENTS',    label: 'Order of Assignment, Designation / Detail',                                                                     status: 'MISSING',     dateUpdated: '' },
-    { category: 'ASSIGNMENTS',    label: 'Service Records',                                   sublabel: 'Indicate Longevity and RCA Orders',              status: 'MISSING',     dateUpdated: '' },
-    { category: 'PROMOTIONS',     label: 'Promotion / Demotion Orders',                       sublabel: 'Include Absorption Order and Appointments',      status: 'MISSING',     dateUpdated: '' },
-    { category: 'AWARDS',         label: 'Awards, Decorations and Commendations',                                                                         status: 'MISSING',     dateUpdated: '' },
-    { category: 'FIREARMS',       label: 'Firearms Records',                                  sublabel: 'Property Accountability Receipt (P.A.R)',        status: 'MISSING',     dateUpdated: '' },
-    { category: 'MEDICAL',        label: 'Latest Medical Records',                                                                                        status: 'MISSING',     dateUpdated: '' },
-    { category: 'CASES',          label: 'Cases / Offenses',                                  sublabel: 'All administrative and criminal cases',          status: 'MISSING',     dateUpdated: '' },
-    { category: 'LEAVE',          label: 'Leave Records',                                                                                                 status: 'MISSING',     dateUpdated: '' },
-    { category: 'PAY_RECORDS',    label: 'RCA / Longevity Pay Orders',                        sublabel: 'All pay orders',                                 status: 'MISSING',     dateUpdated: '' },
-    { category: 'PAY_RECORDS',    label: 'Latest Per FM Previous Unit',                                                                                   status: 'MISSING',     dateUpdated: '' },
-    { category: 'FINANCIAL',      label: 'Statement of Assets, Liabilities & Net Worth',      sublabel: 'SALN — latest copy',                            status: 'MISSING',     dateUpdated: '' },
-    { category: 'TAXATION',       label: 'Individual Income Tax Return (ITR)',                 sublabel: 'Latest filed ITR',                               status: 'MISSING',     dateUpdated: '' },
-    { category: 'TAXATION',       label: 'Photocopy of Tax Identification Card (TIN)',                                                                    status: 'MISSING',     dateUpdated: '' },
-    { category: 'IDENTIFICATION', label: '1 PC Latest 2x2 ID Picture',                        sublabel: 'GOA Type A Uniform',                            status: 'MISSING',     dateUpdated: '' },
+    { category: 'TRAINING',       label: 'Specialized Training / Seminars Attended',          sublabel: 'Certificate of Graduation/Attendance',           status: 'MISSING', dateUpdated: '' },
+    { category: 'ELIGIBILITY',    label: 'Eligibilities',                                     sublabel: 'Highest/Appropriate — attested copies',          status: 'MISSING', dateUpdated: '' },
+    { category: 'SPECIAL_ORDERS', label: 'Attested Appointment / Special Orders',             sublabel: 'Temp/Perm — attested and approved',              status: 'MISSING', dateUpdated: '' },
+    { category: 'ASSIGNMENTS',    label: 'Order of Assignment, Designation / Detail',                                                                     status: 'MISSING', dateUpdated: '' },
+    { category: 'ASSIGNMENTS',    label: 'Service Records',                                   sublabel: 'Indicate Longevity and RCA Orders',              status: 'MISSING', dateUpdated: '' },
+    { category: 'PROMOTIONS',     label: 'Promotion / Demotion Orders',                       sublabel: 'Include Absorption Order and Appointments',      status: 'MISSING', dateUpdated: '' },
+    { category: 'AWARDS',         label: 'Awards, Decorations and Commendations',                                                                         status: 'MISSING', dateUpdated: '' },
+    { category: 'FIREARMS',       label: 'Firearms Records',                                  sublabel: 'Property Accountability Receipt (P.A.R)',        status: 'MISSING', dateUpdated: '' },
+    { category: 'MEDICAL',        label: 'Latest Medical Records',                                                                                        status: 'MISSING', dateUpdated: '' },
+    { category: 'CASES',          label: 'Cases / Offenses',                                  sublabel: 'All administrative and criminal cases',          status: 'MISSING', dateUpdated: '' },
+    { category: 'LEAVE',          label: 'Leave Records',                                                                                                 status: 'MISSING', dateUpdated: '' },
+    { category: 'PAY_RECORDS',    label: 'RCA / Longevity Pay Orders',                        sublabel: 'All pay orders',                                 status: 'MISSING', dateUpdated: '' },
+    { category: 'PAY_RECORDS',    label: 'Latest Per FM Previous Unit',                                                                                   status: 'MISSING', dateUpdated: '' },
+    { category: 'FINANCIAL',      label: 'Statement of Assets, Liabilities & Net Worth',      sublabel: 'SALN — latest copy',                            status: 'MISSING', dateUpdated: '' },
+    { category: 'TAXATION',       label: 'Individual Income Tax Return (ITR)',                 sublabel: 'Latest filed ITR',                               status: 'MISSING', dateUpdated: '' },
+    { category: 'TAXATION',       label: 'Photocopy of Tax Identification Card (TIN)',                                                                    status: 'MISSING', dateUpdated: '' },
+    { category: 'IDENTIFICATION', label: '1 PC Latest 2x2 ID Picture',                        sublabel: 'GOA Type A Uniform',                            status: 'MISSING', dateUpdated: '' },
   ]
 }
 
@@ -133,7 +104,7 @@ export const PERSONNEL_201: Personnel201[] = [
     documents: blankChecklist().map((d, i) => ({
       ...d,
       id: makeId('as', i + 1),
-      status: i < 10 ? 'COMPLETE' : i < 15 ? 'FOR_UPDATE' : 'MISSING',
+      status: (i < 10 ? 'COMPLETE' : i < 15 ? 'FOR_UPDATE' : 'MISSING') as Doc201Status,
       dateUpdated: i < 10 ? '2024-01-08' : '',
       filedBy: i < 10 ? 'Admin' : undefined,
     })),
@@ -160,14 +131,14 @@ export const PERSONNEL_201: Personnel201[] = [
     documents: blankChecklist().map((d, i) => ({
       ...d,
       id: makeId('jr', i + 1),
-      status: i < 6 ? 'COMPLETE' : i < 12 ? 'MISSING' : 'FOR_UPDATE',
+      status: (i < 6 ? 'COMPLETE' : i < 12 ? 'MISSING' : 'FOR_UPDATE') as Doc201Status,
       dateUpdated: i < 6 ? '2024-01-05' : '',
       filedBy: i < 6 ? 'Admin' : undefined,
     })),
   },
 ]
 
-// ── Checklist category labels ─────────────────
+// ── Category labels ───────────────────────────
 export const CATEGORY_LABELS: Record<string, string> = {
   PERSONAL_DATA:  'Personal Data Sheet',
   CIVIL_DOCUMENTS:'Civil Documents',
@@ -186,4 +157,127 @@ export const CATEGORY_LABELS: Record<string, string> = {
   FINANCIAL:      'Financial Disclosures',
   TAXATION:       'Tax Documents',
   IDENTIFICATION: 'Identification',
+}
+
+// ── CRUD Functions ────────────────────────────
+
+/**
+ * Create a new Personnel 201 record.
+ * Tries Supabase first; falls back to an in-memory object if not configured.
+ */
+export async function createPersonnel201(input: {
+  name: string
+  rank: string
+  serialNo: string
+  unit: string
+  initials: string
+  avatarColor: string
+}): Promise<Personnel201 | null> {
+  const today = new Date().toISOString().split('T')[0]
+  const id    = `p201-${Date.now()}`
+
+  const documents: Doc201Item[] = blankChecklist().map((d, i) => ({
+    ...d,
+    id: `${id}-doc-${i + 1}`,
+  }))
+
+  const newRecord: Personnel201 = {
+    id,
+    name:        input.name,
+    rank:        input.rank,
+    serialNo:    input.serialNo,
+    unit:        input.unit,
+    initials:    input.initials,
+    avatarColor: input.avatarColor,
+    dateCreated: today,
+    lastUpdated: today,
+    documents,
+  }
+
+  // Attempt to persist to Supabase (non-fatal if it fails)
+  try {
+    const { error } = await supabase.from('personnel_201').insert({
+      id:           newRecord.id,
+      name:         newRecord.name,
+      rank:         newRecord.rank,
+      serial_no:    newRecord.serialNo,
+      unit:         newRecord.unit,
+      initials:     newRecord.initials,
+      avatar_color: newRecord.avatarColor,
+      date_created: newRecord.dateCreated,
+      last_updated: newRecord.lastUpdated,
+    })
+    if (error) console.warn('Supabase insert warning:', error.message)
+  } catch (e) {
+    console.warn('Supabase unavailable, using local data:', e)
+  }
+
+  return newRecord
+}
+
+/**
+ * Update a single Doc201Item's status in Supabase.
+ * Non-fatal — UI state is the source of truth on the client.
+ */
+export async function updateDoc201Status(
+  docId: string,
+  status: Doc201Status,
+  filedBy: string
+): Promise<void> {
+  const today = new Date().toISOString().split('T')[0]
+  try {
+    const { error } = await supabase
+      .from('personnel_201_docs')
+      .update({ status, filed_by: filedBy, date_updated: today })
+      .eq('id', docId)
+    if (error) console.warn('updateDoc201Status warning:', error.message)
+  } catch (e) {
+    console.warn('Supabase unavailable:', e)
+  }
+}
+
+/**
+ * Upload a file for a Doc201Item to Supabase Storage.
+ * Returns the public URL on success, or null on failure.
+ */
+export async function uploadDoc201File(
+  docId: string,
+  file: File,
+  filedBy: string
+): Promise<string | null> {
+  try {
+    const fileName = `201-docs/${docId}-${Date.now()}-${file.name.replace(/\s+/g, '_')}`
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from('documents')
+      .upload(fileName, file, { cacheControl: '3600', upsert: false })
+
+    if (storageError) {
+      console.warn('uploadDoc201File storage error:', storageError.message)
+      return null
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('documents')
+      .getPublicUrl(storageData.path)
+
+    // Also update status in DB
+    await updateDoc201Status(docId, 'COMPLETE', filedBy)
+
+    return urlData.publicUrl
+  } catch (e) {
+    console.warn('uploadDoc201File error:', e)
+    return null
+  }
+}
+
+/**
+ * Delete a Personnel 201 record from Supabase.
+ */
+export async function deletePersonnel201(id: string): Promise<void> {
+  try {
+    const { error } = await supabase.from('personnel_201').delete().eq('id', id)
+    if (error) console.warn('deletePersonnel201 warning:', error.message)
+  } catch (e) {
+    console.warn('Supabase unavailable:', e)
+  }
 }

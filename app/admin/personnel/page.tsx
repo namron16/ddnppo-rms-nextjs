@@ -531,10 +531,9 @@ export default function PersonnelFilesPage() {
   )
 
   useEffect(() => {
-    getPersonnel201().then((data: Personnel201) => {
-      setPersonnel(data)
-      setLoading(false)
-    })
+    // Load from the seeded PERSONNEL_201 array (replace with API call if needed)
+    setPersonnel(PERSONNEL_201)
+    setLoading(false)
   }, [])
 
   function handleAdd(p: Personnel201) {

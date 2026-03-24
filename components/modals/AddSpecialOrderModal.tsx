@@ -1,30 +1,45 @@
 'use client'
 // components/modals/AddSpecialOrderModal.tsx
-// ─────────────────────────────────────────────
-// Modal form for creating a new Special Order.
 
 import { useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
-import {MasterDocument} from '@/types'
+import type { SpecialOrder } from '@/types'
 
-type DocWithUrl = MasterDocument & { fileUrl?: string }
+type SOWithUrl = SpecialOrder & { fileUrl?: string }
 
-interface Props { open: boolean; onClose: () => void, onAdd?: (newSO:DocWithUrl
-) => Promise<void> }
+interface Props {
+  open: boolean
+  onClose: () => void
+  onAdd?: (newSO: SOWithUrl) => Promise<void>
+}
 
-export function AddSpecialOrderModal({ open, onClose }: Props) {
+export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
   const { toast } = useToast()
   const [form, setForm] = useState({ reference: '', subject: '', date: '', status: 'ACTIVE' })
 
   const field = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }))
 
-  function submit() {
+  async function submit() {
     if (!form.reference || !form.subject || !form.date) {
       toast.error('Please fill in all required fields.')
       return
     }
+
+    const newSO: SOWithUrl = {
+      id:          `so-${Date.now()}`,
+      reference:   form.reference,
+      subject:     form.subject,
+      date:        form.date,
+      attachments: 0,
+      status:      form.status as 'ACTIVE' | 'ARCHIVED',
+    }
+
+    if (onAdd) {
+      await onAdd(newSO)
+    }
+
     toast.success(`Special Order "${form.reference}" created.`)
     onClose()
     setForm({ reference: '', subject: '', date: '', status: 'ACTIVE' })

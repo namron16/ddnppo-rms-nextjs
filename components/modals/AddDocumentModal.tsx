@@ -1,24 +1,18 @@
 'use client'
 // components/modals/AddDocumentModal.tsx
-// ─────────────────────────────────────────────
-// Modal form for uploading / adding a new master document.
-// Used on the Master Documents admin page.
 
 import { useState } from 'react'
-import { Modal }  from '@/components/ui/Modal'
-import { Button } from '@/components/ui/Button'
+import { Modal }    from '@/components/ui/Modal'
+import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
-import { MasterDocument } from '@/types'
-import { SpecialOrder } from '@/types'
+import type { MasterDocument } from '@/types'
 
-type SOWithUrl = SpecialOrder & { fileUrl?: string }
-
+type DocWithUrl = MasterDocument & { fileUrl?: string }
 
 interface AddDocumentModalProps {
   open: boolean
-  onClose: () => void,
-  onAdd?:(newSO: SOWithUrl) => Promise<void>,
-
+  onClose: () => void
+  onAdd?: (newDoc: DocWithUrl) => Promise<void>
 }
 
 export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps) {
@@ -35,12 +29,26 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     setForm(prev => ({ ...prev, [key]: value }))
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!form.title || !form.date) {
       toast.error('Please fill in all required fields.')
       return
     }
-    // In production: POST to API
+
+    const newDoc: DocWithUrl = {
+      id:    `md-${Date.now()}`,
+      title: form.title.trim(),
+      level: form.level as MasterDocument['level'],
+      type:  form.type,
+      date:  form.date,
+      size:  '0 MB',
+      tag:   form.tag,
+    }
+
+    if (onAdd) {
+      await onAdd(newDoc)
+    }
+
     toast.success(`"${form.title}" uploaded successfully.`)
     onClose()
     setForm({ title: '', level: 'REGIONAL', type: 'PDF', date: '', tag: 'COMPLIANCE' })
