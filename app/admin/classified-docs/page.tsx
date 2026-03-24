@@ -1,5 +1,5 @@
 'use client'
-// app/admin/confidential/page.tsx
+// app/admin/classified-docs/page.tsx
 
 import { useState, useEffect } from 'react'
 import { PageHeader }              from '@/components/ui/PageHeader'
@@ -18,6 +18,27 @@ import { classificationBadgeClass } from '@/lib/utils'
 import type { ConfidentialDoc }    from '@/types'
 
 type ConfDocWithUrl = ConfidentialDoc & { fileUrl?: string; passwordHash?: string }
+
+const LOCAL_KEY = 'ddnppo_classified_docs'
+
+function loadLocalDocs(): ConfDocWithUrl[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(LOCAL_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveLocalDocs(docs: ConfDocWithUrl[]) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(docs))
+  } catch {
+    // quota exceeded or private browsing — fail silently
+  }
+}
 
 // ── Hash helper (same as in modal) ───────────
 async function hashPassword(password: string): Promise<string> {
@@ -203,15 +224,42 @@ export default function ConfidentialPage() {
   const { query, setQuery, filtered } = useSearch(docs, ['title'] as Array<keyof ConfDocWithUrl>)
 
   useEffect(() => {
-    getConfidentialDocs().then(data => {
-      setDocs(data)
-      setLoading(false)
-    })
+    async function load() {
+      try {
+        // Try Supabase first
+        const remoteDocs = await getConfidentialDocs()
+        if (remoteDocs.length > 0) {
+          setDocs(remoteDocs)
+          // Sync remote into local so subsequent refreshes also work
+          saveLocalDocs(remoteDocs)
+        } else {
+          // Fall back to localStorage
+          const localDocs = loadLocalDocs()
+          setDocs(localDocs)
+        }
+      } catch {
+        // Supabase not configured — use localStorage
+        const localDocs = loadLocalDocs()
+        setDocs(localDocs)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [])
 
   async function handleAdd(newDoc: ConfDocWithUrl) {
-    await addConfidentialDoc(newDoc)
-    setDocs(prev => [newDoc, ...prev])
+    // Optimistically update UI and localStorage immediately
+    const updatedDocs = [newDoc, ...docs]
+    setDocs(updatedDocs)
+    saveLocalDocs(updatedDocs)
+
+    // Also try to persist to Supabase (non-fatal)
+    try {
+      await addConfidentialDoc(newDoc)
+    } catch {
+      // Supabase unavailable — localStorage already saved it
+    }
   }
 
   function handleUnlocked(doc: ConfDocWithUrl) {
@@ -221,8 +269,17 @@ export default function ConfidentialPage() {
   async function handleDelete() {
     const doc = deleteDisc.payload
     if (!doc) return
-    await deleteConfidentialDoc(doc.id)
-    setDocs(prev => prev.filter(d => d.id !== doc.id))
+
+    const updatedDocs = docs.filter(d => d.id !== doc.id)
+    setDocs(updatedDocs)
+    saveLocalDocs(updatedDocs)
+
+    try {
+      await deleteConfidentialDoc(doc.id)
+    } catch {
+      // Supabase unavailable — localStorage already updated
+    }
+
     toast.success(`"${doc.title}" deleted.`)
     deleteDisc.close()
   }
