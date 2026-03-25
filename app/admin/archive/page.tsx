@@ -1,7 +1,11 @@
 'use client'
 // app/admin/archive/page.tsx
 
+<<<<<<< HEAD
 import { useState, useEffect, useCallback } from 'react'
+=======
+import { useState, useEffect } from 'react'
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
 import { PageHeader }    from '@/components/ui/PageHeader'
 import { Badge }         from '@/components/ui/Badge'
 import { Button }        from '@/components/ui/Button'
@@ -11,6 +15,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ToolbarSelect } from '@/components/ui/Toolbar'
 import { useSearch, useDisclosure } from '@/hooks'
 import { useToast }      from '@/components/ui/Toast'
+<<<<<<< HEAD
 import { getArchivedDocs, restoreArchivedDoc, deleteArchivedDoc } from '@/lib/data'
 
 export default function ArchivePage() {
@@ -73,6 +78,60 @@ export default function ArchivePage() {
     } catch (err) {
       toast.error('Failed to delete document.')
     }
+=======
+import { getArchivedDocs, deleteArchivedDoc, restoreArchivedDoc } from '@/lib/data'
+
+interface ArchivedItem {
+  id: string
+  title: string
+  type: string
+  archivedDate: string
+  archivedBy: string
+}
+
+export default function ArchivePage() {
+  const { toast }    = useToast()
+  const [items, setItems]     = useState<ArchivedItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [typeFilter, setType] = useState('All Types')
+
+  const restoreDisc  = useDisclosure<ArchivedItem>()
+  const deleteDisc   = useDisclosure<ArchivedItem>()
+
+  const { query, setQuery, filtered: searched } = useSearch(items, ['title', 'archivedBy'] as Array<keyof ArchivedItem>)
+  const filtered = searched.filter(i => typeFilter === 'All Types' || i.type === typeFilter)
+
+  useEffect(() => {
+    getArchivedDocs().then(data => {
+      const mapped: ArchivedItem[] = data.map((d: any) => ({
+        id:           d.id,
+        title:        d.title,
+        type:         d.type,
+        archivedDate: d.archived_date ?? d.archivedDate ?? '',
+        archivedBy:   d.archived_by  ?? d.archivedBy  ?? 'Admin',
+      }))
+      setItems(mapped)
+      setLoading(false)
+    })
+  }, [])
+
+  async function handleRestore() {
+    const item = restoreDisc.payload
+    if (!item) return
+    await restoreArchivedDoc(item.id)
+    setItems(prev => prev.filter(i => i.id !== item.id))
+    toast.success(`"${item.title}" has been restored.`)
+    restoreDisc.close()
+  }
+
+  async function handleDelete() {
+    const item = deleteDisc.payload
+    if (!item) return
+    await deleteArchivedDoc(item.id)
+    setItems(prev => prev.filter(i => i.id !== item.id))
+    toast.success(`"${item.title}" permanently deleted.`)
+    deleteDisc.close()
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
   }
 
   return (
@@ -84,6 +143,7 @@ export default function ArchivePage() {
 
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-slate-100 bg-slate-50">
             <SearchInput value={query} onChange={setQuery} placeholder="Search archived documents…" className="max-w-xs flex-1" />
+<<<<<<< HEAD
             <Button 
               variant="outline" 
               size="sm" 
@@ -100,11 +160,25 @@ export default function ArchivePage() {
               <option>Special Order</option>
               <option>Confidential Document</option>
               <option>Master Document</option>
+=======
+            <ToolbarSelect onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setType(e.target.value)}>
+              <option>All Types</option>
+              <option>Special Order</option>
+              <option>Classified Document</option>
+              <option>Master Document</option>
+              <option>Library Item</option>
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
             </ToolbarSelect>
           </div>
 
           {loading ? (
+<<<<<<< HEAD
             <div className="px-6 py-8 text-center text-slate-500">Loading archived documents...</div>
+=======
+            <div className="flex items-center justify-center py-16">
+              <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
           ) : filtered.length === 0 ? (
             <EmptyState icon="🗄️" title="No archived documents found" description="Documents you archive will appear here." />
           ) : (
@@ -126,6 +200,7 @@ export default function ArchivePage() {
                       <td className="px-4 py-3.5 text-sm text-slate-600">{item.archived_by}</td>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2">
+<<<<<<< HEAD
                           <Button 
                             variant="outline" 
                             size="sm" 
@@ -146,6 +221,10 @@ export default function ArchivePage() {
                           >
                             🗑
                           </Button>
+=======
+                          <Button variant="outline" size="sm" onClick={() => restoreDisc.open(item)}>↩ Restore</Button>
+                          <Button variant="ghost"   size="sm" onClick={() => deleteDisc.open(item)}>🗑</Button>
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
                         </div>
                       </td>
                     </tr>
@@ -160,7 +239,7 @@ export default function ArchivePage() {
       <ConfirmDialog
         open={restoreDisc.isOpen}
         title="Restore Document"
-        message={`Restore "${restoreDisc.payload}" to its original location?`}
+        message={`Restore "${restoreDisc.payload?.title}" to its original location?`}
         confirmLabel="Restore" variant="primary"
         onConfirm={handleRestore}
         onCancel={restoreDisc.close}
@@ -168,7 +247,7 @@ export default function ArchivePage() {
       <ConfirmDialog
         open={deleteDisc.isOpen}
         title="Permanently Delete"
-        message={`Permanently delete "${deleteDisc.payload}"? This cannot be undone.`}
+        message={`Permanently delete "${deleteDisc.payload?.title}"? This cannot be undone.`}
         confirmLabel="Delete Forever" variant="danger"
         onConfirm={handleDelete}
         onCancel={deleteDisc.close}

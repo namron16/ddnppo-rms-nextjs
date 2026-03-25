@@ -1,5 +1,5 @@
 'use client'
-// app/admin/special-orders/page.tsx
+// app/admin/admin-orders/page.tsx
 
 import { useState, useEffect } from 'react'
 import { PageHeader }           from '@/components/ui/PageHeader'
@@ -13,8 +13,12 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
+<<<<<<< HEAD
 import { useAuth }              from '@/lib/auth'
 import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder } from '@/lib/data'
+=======
+import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder, addArchivedDoc } from '@/lib/data'
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
 import { statusBadgeClass }     from '@/lib/utils'
 import type { SpecialOrder }    from '@/types'
 
@@ -30,8 +34,6 @@ function ViewSOModal({ so, open, onClose }: { so: SOWithUrl | null; open: boolea
   return (
     <Modal open={open} onClose={onClose} title="Special Order Details" width="max-w-2xl">
       <div className="p-6 space-y-5">
-
-        {/* Header info */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-1">Reference</p>
@@ -53,7 +55,6 @@ function ViewSOModal({ so, open, onClose }: { so: SOWithUrl | null; open: boolea
           <span className="text-xs text-slate-400">📎 {so.attachments} attachment(s)</span>
         </div>
 
-        {/* File preview */}
         {so.fileUrl ? (
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50">
@@ -120,23 +121,22 @@ export default function SpecialOrdersPage() {
     return so.status === statusFilter
   })
 
-  // Load from Supabase on mount
   useEffect(() => {
     getSpecialOrders().then(data => {
-      setOrders(data)
+      // Only show non-archived orders on this page
+      setOrders(data.filter(o => o.status !== 'ARCHIVED'))
       setLoading(false)
     })
   }, [])
 
-  // Add new SO
   async function handleAdd(newSO: SOWithUrl) {
     await addSpecialOrder(newSO)
     setOrders(prev => [newSO, ...prev])
   }
 
-  // Archive SO — marks as ARCHIVED instead of removing
   async function handleArchive() {
     const so = archiveDisc.payload
+<<<<<<< HEAD
     if (!so || !user) return
     
     try {
@@ -159,6 +159,28 @@ export default function SpecialOrdersPage() {
       toast.error('Failed to archive order. Please try again.')
     }
     
+=======
+    if (!so) return
+
+    const today = new Date().toISOString().split('T')[0]
+
+    // Mark as ARCHIVED in the special_orders table
+    await archiveSpecialOrder(so.id)
+
+    // Add to archived_docs so the Archive page shows it
+    await addArchivedDoc({
+      id:           `arc-so-${so.id}`,
+      title:        `${so.reference} – ${so.subject}`,
+      type:         'Special Order',
+      archivedDate: today,
+      archivedBy:   'Admin',
+    })
+
+    // Remove from this page immediately
+    setOrders(prev => prev.filter(o => o.id !== so.id))
+
+    toast.success(`"${so.reference}" has been moved to the Archive.`)
+>>>>>>> 95854486feda8436983777c16b1af8b447843777
     archiveDisc.close()
   }
 
@@ -169,7 +191,6 @@ export default function SpecialOrdersPage() {
       <div className="p-8">
         <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden">
 
-          {/* Toolbar */}
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-slate-100 bg-slate-50">
             <SearchInput value={query} onChange={setQuery} placeholder="Search special orders…" className="max-w-xs flex-1" />
             <ToolbarSelect onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatus(e.target.value)}>
@@ -218,15 +239,7 @@ export default function SpecialOrdersPage() {
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1">
                           <Button variant="ghost" size="sm" title="View" onClick={() => viewDisc.open(so)}>👁</Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title={so.status === 'ARCHIVED' ? 'Already archived' : 'Archive'}
-                            disabled={so.status === 'ARCHIVED'}
-                            onClick={() => archiveDisc.open(so)}
-                          >
-                            🗄️
-                          </Button>
+                          <Button variant="ghost" size="sm" title="Archive" onClick={() => archiveDisc.open(so)}>🗄️</Button>
                         </div>
                       </td>
                     </tr>
@@ -239,7 +252,6 @@ export default function SpecialOrdersPage() {
       </div>
 
       <AddSpecialOrderModal open={newSOModal.isOpen} onClose={newSOModal.close} onAdd={handleAdd} />
-
       <ViewSOModal so={viewDisc.payload ?? null} open={viewDisc.isOpen} onClose={viewDisc.close} />
 
       <ConfirmDialog
