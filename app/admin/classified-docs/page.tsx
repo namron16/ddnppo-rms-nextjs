@@ -13,11 +13,14 @@ import { Modal }                   from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }                from '@/components/ui/Toast'
-import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc } from '@/lib/data'
+import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc, addArchivedDoc } from '@/lib/data'
 import { classificationBadgeClass } from '@/lib/utils'
 import type { ConfidentialDoc }    from '@/types'
 
 type ConfDocWithUrl = ConfidentialDoc & { fileUrl?: string; passwordHash?: string; archived?: boolean }
+
+// Ensure ConfidentialDoc type includes archived property by extending it
+type ConfidentialDocExtended = ConfidentialDoc & { archived?: boolean }
 
 const LOCAL_KEY = 'ddnppo_classified_docs'
 
@@ -35,12 +38,9 @@ function saveLocalDocs(docs: ConfDocWithUrl[]) {
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(LOCAL_KEY, JSON.stringify(docs))
-  } catch {
-    // quota exceeded or private browsing — fail silently
-  }
+  } catch {}
 }
 
-// ── Hash helper (same as in modal) ───────────
 async function hashPassword(password: string): Promise<string> {
   const encoder    = new TextEncoder()
   const data       = encoder.encode(password)
@@ -65,12 +65,9 @@ function UnlockModal({ doc, open, onClose, onUnlocked }: {
   async function submit() {
     if (!password) { toast.error('Please enter the document password.'); return }
     if (!doc)      return
-
     setChecking(true)
     setWrongPass(false)
-
     const inputHash = await hashPassword(password)
-
     if (inputHash === doc.passwordHash) {
       toast.success('Document unlocked successfully.')
       setPassword('')
@@ -81,7 +78,6 @@ function UnlockModal({ doc, open, onClose, onUnlocked }: {
       setWrongPass(true)
       toast.error('Incorrect password. Access denied.')
     }
-
     setChecking(false)
   }
 
@@ -98,7 +94,6 @@ function UnlockModal({ doc, open, onClose, onUnlocked }: {
           <p className="text-xs text-amber-800 font-semibold mb-0.5">🔒 {doc?.title}</p>
           <p className="text-xs text-amber-700">Enter the document password to view this file.</p>
         </div>
-
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
             Document Password
@@ -124,7 +119,6 @@ function UnlockModal({ doc, open, onClose, onUnlocked }: {
             <p className="text-xs text-red-500 mt-1.5 font-medium">❌ Incorrect password. Please try again.</p>
           )}
         </div>
-
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={handleClose} disabled={checking}>Cancel</Button>
           <Button variant="primary" onClick={submit} disabled={checking}>
@@ -143,7 +137,6 @@ function ViewDocModal({ doc, open, onClose }: {
   onClose: () => void
 }) {
   if (!doc) return null
-
   const isPDF   = doc.fileUrl?.endsWith('.pdf')
   const isImage = doc.fileUrl?.match(/\.(jpg|jpeg|png|webp)$/i)
 
@@ -164,7 +157,6 @@ function ViewDocModal({ doc, open, onClose }: {
             <p className="text-sm font-bold text-slate-800">{doc.date}</p>
           </div>
         </div>
-
         {doc.fileUrl ? (
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50">
@@ -201,7 +193,6 @@ function ViewDocModal({ doc, open, onClose }: {
             <p className="text-sm text-slate-400">No file uploaded for this document.</p>
           </div>
         )}
-
         <div className="flex justify-end">
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
@@ -226,20 +217,18 @@ export default function ConfidentialPage() {
   useEffect(() => {
     async function load() {
       try {
-        // Try Supabase first
         const remoteDocs = await getConfidentialDocs()
         if (remoteDocs.length > 0) {
-          setDocs(remoteDocs)
-          // Sync remote into local so subsequent refreshes also work
-          saveLocalDocs(remoteDocs)
+          // Only show non-archived docs on this page
+          const active = (remoteDocs as ConfDocWithUrl[]).filter(d => !d.archived)
+          setDocs(active)
+          saveLocalDocs(active)
         } else {
-          // Fall back to localStorage
-          const localDocs = loadLocalDocs()
+          const localDocs = loadLocalDocs().filter(d => !d.archived)
           setDocs(localDocs)
         }
       } catch {
-        // Supabase not configured — use localStorage
-        const localDocs = loadLocalDocs()
+        const localDocs = loadLocalDocs().filter(d => !d.archived)
         setDocs(localDocs)
       } finally {
         setLoading(false)
@@ -249,39 +238,44 @@ export default function ConfidentialPage() {
   }, [])
 
   async function handleAdd(newDoc: ConfDocWithUrl) {
-    // Optimistically update UI and localStorage immediately
     const updatedDocs = [newDoc, ...docs]
     setDocs(updatedDocs)
     saveLocalDocs(updatedDocs)
-
-    // Also try to persist to Supabase (non-fatal)
     try {
       await addConfidentialDoc(newDoc)
-    } catch {
-      // Supabase unavailable — localStorage already saved it
-    }
+    } catch {}
   }
 
   function handleUnlocked(doc: ConfDocWithUrl) {
     viewDisc.open(doc)
   }
 
-  // Archive doc — marks as archived instead of removing
   async function handleArchive() {
     const doc = archiveDisc.payload
     if (!doc) return
 
-    const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
+    const today = new Date().toISOString().split('T')[0]
+
+    // Mark archived in Supabase confidential_docs table
+    try {
+      await archiveConfidentialDoc(doc.id)
+    } catch {}
+
+    // Add to archived_docs so the Archive page shows it
+    await addArchivedDoc({
+      id:           `arc-cd-${doc.id}`,
+      title:        doc.title,
+      type:         'Classified Document',
+      archivedDate: today,
+      archivedBy:   'Admin',
+    })
+
+    // Remove from local list so it disappears from this page
+    const updatedDocs = docs.filter(d => d.id !== doc.id)
     setDocs(updatedDocs)
     saveLocalDocs(updatedDocs)
 
-    try {
-      await archiveConfidentialDoc(doc.id)
-    } catch {
-      // Supabase unavailable — localStorage already updated
-    }
-
-    toast.success(`"${doc.title}" has been archived.`)
+    toast.success(`"${doc.title}" has been moved to the Archive.`)
     archiveDisc.close()
   }
 
@@ -341,13 +335,7 @@ export default function ConfidentialPage() {
                             className="bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold px-2.5 py-1 rounded-md hover:bg-amber-200 transition">
                             🔓 Unlock
                           </button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title={doc.archived ? 'Already archived' : 'Archive'}
-                            disabled={doc.archived}
-                            onClick={() => archiveDisc.open(doc)}
-                          >
+                          <Button variant="ghost" size="sm" title="Archive" onClick={() => archiveDisc.open(doc)}>
                             🗄️
                           </Button>
                         </div>
