@@ -13,12 +13,7 @@ import { Modal }                   from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }                from '@/components/ui/Toast'
-<<<<<<< HEAD
-import { useAuth }                 from '@/lib/auth'
-import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc } from '@/lib/data'
-=======
 import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc, addArchivedDoc } from '@/lib/data'
->>>>>>> 95854486feda8436983777c16b1af8b447843777
 import { classificationBadgeClass } from '@/lib/utils'
 import type { ConfidentialDoc }    from '@/types'
 
@@ -257,21 +252,6 @@ export default function ConfidentialPage() {
 
   async function handleArchive() {
     const doc = archiveDisc.payload
-<<<<<<< HEAD
-    if (!doc) return
-
-    const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
-    setDocs(updatedDocs)
-    saveLocalDocs(updatedDocs)
-
-    try {
-      await archiveConfidentialDoc(doc.id)
-    } catch {
-      // Supabase unavailable — localStorage already updated
-    }
-
-    toast.success(`"${doc.title}" has been archived.`)
-=======
     if (!doc) return
 
     const today = new Date().toISOString().split('T')[0]
@@ -296,7 +276,6 @@ export default function ConfidentialPage() {
     saveLocalDocs(updatedDocs)
 
     toast.success(`"${doc.title}" has been moved to the Archive.`)
->>>>>>> 95854486feda8436983777c16b1af8b447843777
     archiveDisc.close()
   }
 
