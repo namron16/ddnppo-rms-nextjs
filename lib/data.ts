@@ -111,19 +111,32 @@ export async function deleteConfidentialDoc(id: string): Promise<void> {
 /* ════════════════════════════════════════════
    LIBRARY ITEMS
 ════════════════════════════════════════════ */
-export async function getLibraryItems(): Promise<LibraryItem[]> {
+export async function getLibraryItems(): Promise<(LibraryItem & { fileUrl?: string; description?: string })[]> {
   const { data, error } = await supabase
     .from('library_items').select('*').order('created_at', { ascending: false })
   if (error) { console.warn('Supabase unavailable (library_items):', error.message); return [] }
   return (data ?? []).map(d => ({
-    id: d.id, title: d.title, category: d.category, size: d.size, dateAdded: d.date_added,
+    id:          d.id,
+    title:       d.title,
+    category:    d.category,
+    size:        d.size,
+    dateAdded:   d.date_added,
+    fileUrl:     d.file_url     ?? undefined,
+    description: d.description  ?? undefined,
   }))
 }
 
-export async function addLibraryItem(item: LibraryItem): Promise<void> {
+export async function addLibraryItem(
+  item: LibraryItem & { fileUrl?: string; description?: string }
+): Promise<void> {
   const { error } = await supabase.from('library_items').insert({
-    id: item.id, title: item.title, category: item.category,
-    size: item.size, date_added: item.dateAdded,
+    id:          item.id,
+    title:       item.title,
+    category:    item.category,
+    size:        item.size,
+    date_added:  item.dateAdded,
+    file_url:    item.fileUrl    ?? null,
+    description: item.description ?? null,
   })
   if (error) console.warn('Supabase unavailable (add library_item):', error.message)
 }
