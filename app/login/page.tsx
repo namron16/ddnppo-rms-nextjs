@@ -45,7 +45,7 @@ export default function LoginPage() {
             Records Management<br />System
           </h1>
           <p className="text-white/60 text-[15px] leading-relaxed mb-12 max-w-sm">
-            Secure, centralized document management for Davao Del Norte
+            Secure, centralized document management for Davao Norte
             Provincial Police Office.
           </p>
 
@@ -69,7 +69,7 @@ export default function LoginPage() {
       <div className="w-[460px] bg-white px-14 flex flex-col justify-center">
         <h2 className="font-display text-3xl text-slate-800 mb-2">Sign In</h2>
         <p className="text-slate-500 text-sm mb-9">
-          Access restricted to authorized DDNPPO personnel.
+          Access restricted to authorized DNPPO personnel.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
