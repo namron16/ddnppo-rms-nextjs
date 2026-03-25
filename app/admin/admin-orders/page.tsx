@@ -13,7 +13,7 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
-import { getSpecialOrders, addSpecialOrder, deleteSpecialOrder } from '@/lib/data'
+import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder } from '@/lib/data'
 import { statusBadgeClass }     from '@/lib/utils'
 import type { SpecialOrder }    from '@/types'
 
@@ -101,13 +101,13 @@ function ViewSOModal({ so, open, onClose }: { so: SOWithUrl | null; open: boolea
 // ── Main Page ─────────────────────────────────
 export default function SpecialOrdersPage() {
   const { toast }  = useToast()
-  const [orders, setOrders]     = useState<SOWithUrl[]>([])
-  const [loading, setLoading]   = useState(true)
+  const [orders, setOrders]       = useState<SOWithUrl[]>([])
+  const [loading, setLoading]     = useState(true)
   const [statusFilter, setStatus] = useState('ALL')
 
   const newSOModal  = useModal()
   const viewDisc    = useDisclosure<SOWithUrl>()
-  const deleteDisc  = useDisclosure<SOWithUrl>()
+  const archiveDisc = useDisclosure<SOWithUrl>()
 
   const { query, setQuery, filtered: searched } = useSearch(orders, ['reference', 'subject'] as Array<keyof SOWithUrl>)
   const filtered = searched.filter(so => statusFilter === 'ALL' || so.status === statusFilter)
@@ -126,14 +126,14 @@ export default function SpecialOrdersPage() {
     setOrders(prev => [newSO, ...prev])
   }
 
-  // Delete SO
-  async function handleDelete() {
-    const so = deleteDisc.payload
+  // Archive SO — marks as ARCHIVED instead of removing
+  async function handleArchive() {
+    const so = archiveDisc.payload
     if (!so) return
-    await deleteSpecialOrder(so.id)
-    setOrders(prev => prev.filter(o => o.id !== so.id))
-    toast.success(`"${so.reference}" deleted.`)
-    deleteDisc.close()
+    await archiveSpecialOrder(so.id)
+    setOrders(prev => prev.map(o => o.id === so.id ? { ...o, status: 'ARCHIVED' as const } : o))
+    toast.success(`"${so.reference}" has been archived.`)
+    archiveDisc.close()
   }
 
   return (
@@ -192,8 +192,16 @@ export default function SpecialOrdersPage() {
                       </td>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => viewDisc.open(so)}>👁</Button>
-                          <Button variant="ghost" size="sm" onClick={() => deleteDisc.open(so)}>🗑</Button>
+                          <Button variant="ghost" size="sm" title="View" onClick={() => viewDisc.open(so)}>👁</Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title={so.status === 'ARCHIVED' ? 'Already archived' : 'Archive'}
+                            disabled={so.status === 'ARCHIVED'}
+                            onClick={() => archiveDisc.open(so)}
+                          >
+                            🗄️
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -210,13 +218,13 @@ export default function SpecialOrdersPage() {
       <ViewSOModal so={viewDisc.payload ?? null} open={viewDisc.isOpen} onClose={viewDisc.close} />
 
       <ConfirmDialog
-        open={deleteDisc.isOpen}
-        title="Delete Special Order"
-        message={`Permanently delete "${deleteDisc.payload?.reference}"? This cannot be undone.`}
-        confirmLabel="Delete"
-        variant="danger"
-        onConfirm={handleDelete}
-        onCancel={deleteDisc.close}
+        open={archiveDisc.isOpen}
+        title="Archive Special Order"
+        message={`Archive "${archiveDisc.payload?.reference}"? It will be moved to the Archive and can be restored later.`}
+        confirmLabel="Archive"
+        variant="primary"
+        onConfirm={handleArchive}
+        onCancel={archiveDisc.close}
       />
     </>
   )

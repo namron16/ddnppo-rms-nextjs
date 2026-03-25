@@ -76,6 +76,13 @@ export async function deleteSpecialOrder(id: string): Promise<void> {
   if (error) console.warn('Supabase unavailable (delete special_order):', error.message)
 }
 
+// Sets status to ARCHIVED — record is kept, not deleted
+export async function archiveSpecialOrder(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('special_orders').update({ status: 'ARCHIVED' }).eq('id', id)
+  if (error) console.warn('Supabase unavailable (archive special_order):', error.message)
+}
+
 /* ════════════════════════════════════════════
    CONFIDENTIAL DOCUMENTS
 ════════════════════════════════════════════ */
@@ -106,6 +113,13 @@ export async function addConfidentialDoc(
 export async function deleteConfidentialDoc(id: string): Promise<void> {
   const { error } = await supabase.from('confidential_docs').delete().eq('id', id)
   if (error) console.warn('Supabase unavailable (delete confidential_doc):', error.message)
+}
+
+// Sets archived to true — record is kept, not deleted
+export async function archiveConfidentialDoc(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('confidential_docs').update({ archived: true }).eq('id', id)
+  if (error) console.warn('Supabase unavailable (archive confidential_doc):', error.message)
 }
 
 /* ════════════════════════════════════════════

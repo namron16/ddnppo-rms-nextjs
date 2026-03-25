@@ -13,11 +13,11 @@ import { Modal }                   from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }                from '@/components/ui/Toast'
-import { getConfidentialDocs, addConfidentialDoc, deleteConfidentialDoc } from '@/lib/data'
+import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc } from '@/lib/data'
 import { classificationBadgeClass } from '@/lib/utils'
 import type { ConfidentialDoc }    from '@/types'
 
-type ConfDocWithUrl = ConfidentialDoc & { fileUrl?: string; passwordHash?: string }
+type ConfDocWithUrl = ConfidentialDoc & { fileUrl?: string; passwordHash?: string; archived?: boolean }
 
 const LOCAL_KEY = 'ddnppo_classified_docs'
 
@@ -216,10 +216,10 @@ export default function ConfidentialPage() {
   const [docs, setDocs]       = useState<ConfDocWithUrl[]>([])
   const [loading, setLoading] = useState(true)
 
-  const newModal   = useModal()
-  const unlockDisc = useDisclosure<ConfDocWithUrl>()
-  const viewDisc   = useDisclosure<ConfDocWithUrl>()
-  const deleteDisc = useDisclosure<ConfDocWithUrl>()
+  const newModal    = useModal()
+  const unlockDisc  = useDisclosure<ConfDocWithUrl>()
+  const viewDisc    = useDisclosure<ConfDocWithUrl>()
+  const archiveDisc = useDisclosure<ConfDocWithUrl>()
 
   const { query, setQuery, filtered } = useSearch(docs, ['title'] as Array<keyof ConfDocWithUrl>)
 
@@ -266,22 +266,23 @@ export default function ConfidentialPage() {
     viewDisc.open(doc)
   }
 
-  async function handleDelete() {
-    const doc = deleteDisc.payload
+  // Archive doc — marks as archived instead of removing
+  async function handleArchive() {
+    const doc = archiveDisc.payload
     if (!doc) return
 
-    const updatedDocs = docs.filter(d => d.id !== doc.id)
+    const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
     setDocs(updatedDocs)
     saveLocalDocs(updatedDocs)
 
     try {
-      await deleteConfidentialDoc(doc.id)
+      await archiveConfidentialDoc(doc.id)
     } catch {
       // Supabase unavailable — localStorage already updated
     }
 
-    toast.success(`"${doc.title}" deleted.`)
-    deleteDisc.close()
+    toast.success(`"${doc.title}" has been archived.`)
+    archiveDisc.close()
   }
 
   return (
@@ -340,7 +341,15 @@ export default function ConfidentialPage() {
                             className="bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold px-2.5 py-1 rounded-md hover:bg-amber-200 transition">
                             🔓 Unlock
                           </button>
-                          <Button variant="ghost" size="sm" onClick={() => deleteDisc.open(doc)}>🗑</Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title={doc.archived ? 'Already archived' : 'Archive'}
+                            disabled={doc.archived}
+                            onClick={() => archiveDisc.open(doc)}
+                          >
+                            🗄️
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -368,13 +377,13 @@ export default function ConfidentialPage() {
       />
 
       <ConfirmDialog
-        open={deleteDisc.isOpen}
-        title="Delete Classified Document"
-        message={`Permanently delete "${deleteDisc.payload?.title}"? This cannot be undone.`}
-        confirmLabel="Delete"
-        variant="danger"
-        onConfirm={handleDelete}
-        onCancel={deleteDisc.close}
+        open={archiveDisc.isOpen}
+        title="Archive Classified Document"
+        message={`Archive "${archiveDisc.payload?.title}"? It will be moved to the Archive and can be restored later.`}
+        confirmLabel="Archive"
+        variant="primary"
+        onConfirm={handleArchive}
+        onCancel={archiveDisc.close}
       />
     </>
   )
