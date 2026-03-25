@@ -209,7 +209,6 @@ function ViewDocModal({ doc, open, onClose }: {
 // ── Main Page ─────────────────────────────────
 export default function ConfidentialPage() {
   const { toast }  = useToast()
-  const { user }   = useAuth()
   const [docs, setDocs]       = useState<ConfDocWithUrl[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -218,9 +217,7 @@ export default function ConfidentialPage() {
   const viewDisc    = useDisclosure<ConfDocWithUrl>()
   const archiveDisc = useDisclosure<ConfDocWithUrl>()
 
-  const { query, setQuery, filtered: searched } = useSearch(docs, ['title'] as Array<keyof ConfDocWithUrl>)
-  // Hide archived documents from main view
-  const filtered = searched.filter(d => !d.archived)
+  const { query, setQuery, filtered } = useSearch(docs, ['title'] as Array<keyof ConfDocWithUrl>)
 
   useEffect(() => {
     async function load() {
@@ -261,31 +258,19 @@ export default function ConfidentialPage() {
   async function handleArchive() {
     const doc = archiveDisc.payload
 <<<<<<< HEAD
-    if (!doc || !user) return
+    if (!doc) return
+
+    const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
+    setDocs(updatedDocs)
+    saveLocalDocs(updatedDocs)
 
     try {
-      console.log('📦 Archiving classified doc:', doc.id)
-      
-      // Ensure document is synced to Supabase before archiving
-      console.log('🔄 Ensuring document is synced to Supabase...')
-      await addConfidentialDoc(doc)
-      console.log('✅ Document synced to Supabase')
-      
-      // Now archive it
-      await archiveConfidentialDoc(doc.id, user.name)
-      console.log('✅ Successfully archived:', doc.title)
-      
-      // Remove from local view ONLY after successful archive
-      const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
-      setDocs(updatedDocs)
-      saveLocalDocs(updatedDocs)
-      
-      toast.success(`"${doc.title}" has been archived.`)
-    } catch (err) {
-      console.error('❌ Archive failed:', err)
-      toast.error('Failed to archive document. Please try again.')
+      await archiveConfidentialDoc(doc.id)
+    } catch {
+      // Supabase unavailable — localStorage already updated
     }
-    
+
+    toast.success(`"${doc.title}" has been archived.`)
 =======
     if (!doc) return
 

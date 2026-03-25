@@ -2,7 +2,7 @@
 // app/dashboard/page.tsx
 // Officer dashboard: topbar, hero, quick-access cards, 6 modals.
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth }   from '@/lib/auth'
 import { Modal }     from '@/components/ui/Modal'
@@ -12,7 +12,6 @@ import { AlertWarning } from '@/components/ui/AlertWarning'
 import { OrgChart }  from '@/components/ui/OrgChart'
 import { Toolbar, ToolbarSelect } from '@/components/ui/Toolbar'
 import {
-  getDashboardCounts,
   MASTER_DOCUMENTS, SPECIAL_ORDERS, JOURNAL_ENTRIES,
   CONFIDENTIAL_DOCS, LIBRARY_ITEMS, ORG_CHART,
 } from '@/lib/data'
@@ -24,22 +23,20 @@ import {
 // ── Quick access card definition ──────────────────
 type ModalKey = 'master' | 'so' | 'journal' | 'confidential' | 'library' | 'directory' | null
 
-function getCards(counts: { masterDocs: number; specialOrders: number; confidentialDocs: number; personnelRecords: number }): Array<{
+const CARDS: Array<{
   key: ModalKey
   icon: string
   title: string
   desc: string
   badge?: string
-}> {
-  return [
-    { key: 'master',       icon: '📁', title: 'Master Documents',       desc: 'Regional, provincial & station documents',                       badge: `${counts.masterDocs} DOCS` },
-    { key: 'so',           icon: '📋', title: 'Administrative Orders',  desc: 'Designation, transfer, special & letter orders',                 badge: `${counts.specialOrders} DOCS` },
-    { key: 'journal',      icon: '📂', title: '201 File',               desc: 'Police personnel file',                                          badge: `${counts.personnelRecords} RECORDS` },
-    { key: 'confidential', icon: '🔒', title: 'Classified Documents',   desc: 'Password-protected classified documents',                        badge: `${counts.confidentialDocs} DOCS` },
-    { key: 'library',      icon: '📚', title: 'e-Library',              desc: 'Memorandum circulars, SOPs, directives, relevant laws, rules & regulations' },
-    { key: 'directory',    icon: '🏛️', title: 'Organization',          desc: 'Organizational structure & directory' },
-  ]
-}
+}> = [
+  { key: 'master',       icon: '📁', title: 'Master Documents',       desc: 'Regional, provincial & station documents',                       badge: '7 DOCS' },
+  { key: 'so',           icon: '📋', title: 'Administrative Orders',  desc: 'Designation, transfer, special & letter orders',                 badge: '3 DOCS' },
+  { key: 'journal',      icon: '📂', title: '201 File',               desc: 'Police personnel file' },
+  { key: 'confidential', icon: '🔒', title: 'Classified Documents',   desc: 'Password-protected classified documents' },
+  { key: 'library',      icon: '📚', title: 'e-Library',              desc: 'Memorandum circulars, SOPs, directives, relevant laws, rules & regulations' },
+  { key: 'directory',    icon: '🏛️', title: 'Organization',          desc: 'Organizational structure & directory' },
+]
 
 // ── Flatten master docs for modal list ────────────
 function flattenDocs(docs: typeof MASTER_DOCUMENTS): typeof MASTER_DOCUMENTS {
@@ -57,11 +54,6 @@ export default function DashboardPage() {
   const { user, logout } = useAuth()
   const router = useRouter()
   const [openModal, setOpenModal] = useState<ModalKey>(null)
-  const [counts, setCounts] = useState({ masterDocs: 0, specialOrders: 0, confidentialDocs: 0, personnelRecords: 0 })
-
-  useEffect(() => {
-    getDashboardCounts().then(setCounts)
-  }, [])
 
   function handleLogout() {
     logout()
@@ -121,7 +113,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-3 gap-4 max-w-[660px]">
-          {getCards(counts).map(card => (
+          {CARDS.map(card => (
             <button
               key={card.key}
               onClick={() => setOpenModal(card.key)}

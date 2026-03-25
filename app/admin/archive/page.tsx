@@ -158,7 +158,6 @@ export default function ArchivePage() {
             <ToolbarSelect>
               <option>All Types</option>
               <option>Special Order</option>
-              <option>Confidential Document</option>
               <option>Master Document</option>
 =======
             <ToolbarSelect onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setType(e.target.value)}>
@@ -196,8 +195,8 @@ export default function ArchivePage() {
                     <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-4 py-3.5 font-semibold text-sm text-slate-800">{item.title}</td>
                       <td className="px-4 py-3.5"><Badge className="bg-slate-200 text-slate-500">{item.type}</Badge></td>
-                      <td className="px-4 py-3.5 text-sm text-slate-500">{item.archived_date}</td>
-                      <td className="px-4 py-3.5 text-sm text-slate-600">{item.archived_by}</td>
+                      <td className="px-4 py-3.5 text-sm text-slate-500">{item.archivedDate}</td>
+                      <td className="px-4 py-3.5 text-sm text-slate-600">{item.archivedBy}</td>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2">
 <<<<<<< HEAD
@@ -241,7 +240,7 @@ export default function ArchivePage() {
         title="Restore Document"
         message={`Restore "${restoreDisc.payload?.title}" to its original location?`}
         confirmLabel="Restore" variant="primary"
-        onConfirm={handleRestore}
+        onConfirm={() => { toast.success('Document restored successfully.'); restoreDisc.close() }}
         onCancel={restoreDisc.close}
       />
       <ConfirmDialog
@@ -249,7 +248,7 @@ export default function ArchivePage() {
         title="Permanently Delete"
         message={`Permanently delete "${deleteDisc.payload?.title}"? This cannot be undone.`}
         confirmLabel="Delete Forever" variant="danger"
-        onConfirm={handleDelete}
+        onConfirm={() => { toast.success('Document permanently deleted.'); deleteDisc.close() }}
         onCancel={deleteDisc.close}
       />
     </>

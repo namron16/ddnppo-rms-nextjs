@@ -13,8 +13,6 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
-<<<<<<< HEAD
-import { useAuth }              from '@/lib/auth'
 import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder } from '@/lib/data'
 =======
 import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder, addArchivedDoc } from '@/lib/data'
@@ -103,7 +101,6 @@ function ViewSOModal({ so, open, onClose }: { so: SOWithUrl | null; open: boolea
 // ── Main Page ─────────────────────────────────
 export default function SpecialOrdersPage() {
   const { toast }  = useToast()
-  const { user }   = useAuth()
   const [orders, setOrders]       = useState<SOWithUrl[]>([])
   const [loading, setLoading]     = useState(true)
   const [statusFilter, setStatus] = useState('ALL')
@@ -113,13 +110,7 @@ export default function SpecialOrdersPage() {
   const archiveDisc = useDisclosure<SOWithUrl>()
 
   const { query, setQuery, filtered: searched } = useSearch(orders, ['reference', 'subject'] as Array<keyof SOWithUrl>)
-  const filtered = searched.filter(so => {
-    // Always hide archived files from main view
-    if (so.status === 'ARCHIVED') return false
-    // Apply status filter if selected
-    if (statusFilter === 'ALL') return true
-    return so.status === statusFilter
-  })
+  const filtered = searched.filter(so => statusFilter === 'ALL' || so.status === statusFilter)
 
   useEffect(() => {
     getSpecialOrders().then(data => {
@@ -196,6 +187,7 @@ export default function SpecialOrdersPage() {
             <ToolbarSelect onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatus(e.target.value)}>
               <option value="ALL">All Status</option>
               <option value="ACTIVE">Active</option>
+              <option value="ARCHIVED">Archived</option>
             </ToolbarSelect>
             <Button variant="primary" size="sm" className="ml-auto" onClick={newSOModal.open}>
               + New SO
