@@ -13,6 +13,7 @@ import { Modal }                   from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }                from '@/components/ui/Toast'
+import { useAuth }                 from '@/lib/auth'
 import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc } from '@/lib/data'
 import { classificationBadgeClass } from '@/lib/utils'
 import type { ConfidentialDoc }    from '@/types'
@@ -213,6 +214,7 @@ function ViewDocModal({ doc, open, onClose }: {
 // ── Main Page ─────────────────────────────────
 export default function ConfidentialPage() {
   const { toast }  = useToast()
+  const { user }   = useAuth()
   const [docs, setDocs]       = useState<ConfDocWithUrl[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -221,7 +223,9 @@ export default function ConfidentialPage() {
   const viewDisc    = useDisclosure<ConfDocWithUrl>()
   const archiveDisc = useDisclosure<ConfDocWithUrl>()
 
-  const { query, setQuery, filtered } = useSearch(docs, ['title'] as Array<keyof ConfDocWithUrl>)
+  const { query, setQuery, filtered: searched } = useSearch(docs, ['title'] as Array<keyof ConfDocWithUrl>)
+  // Hide archived documents from main view
+  const filtered = searched.filter(d => !d.archived)
 
   useEffect(() => {
     async function load() {
@@ -269,19 +273,31 @@ export default function ConfidentialPage() {
   // Archive doc — marks as archived instead of removing
   async function handleArchive() {
     const doc = archiveDisc.payload
-    if (!doc) return
-
-    const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
-    setDocs(updatedDocs)
-    saveLocalDocs(updatedDocs)
+    if (!doc || !user) return
 
     try {
-      await archiveConfidentialDoc(doc.id)
-    } catch {
-      // Supabase unavailable — localStorage already updated
+      console.log('📦 Archiving classified doc:', doc.id)
+      
+      // Ensure document is synced to Supabase before archiving
+      console.log('🔄 Ensuring document is synced to Supabase...')
+      await addConfidentialDoc(doc)
+      console.log('✅ Document synced to Supabase')
+      
+      // Now archive it
+      await archiveConfidentialDoc(doc.id, user.name)
+      console.log('✅ Successfully archived:', doc.title)
+      
+      // Remove from local view ONLY after successful archive
+      const updatedDocs = docs.map(d => d.id === doc.id ? { ...d, archived: true } : d)
+      setDocs(updatedDocs)
+      saveLocalDocs(updatedDocs)
+      
+      toast.success(`"${doc.title}" has been archived.`)
+    } catch (err) {
+      console.error('❌ Archive failed:', err)
+      toast.error('Failed to archive document. Please try again.')
     }
-
-    toast.success(`"${doc.title}" has been archived.`)
+    
     archiveDisc.close()
   }
 

@@ -13,6 +13,7 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
+import { useAuth }              from '@/lib/auth'
 import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder } from '@/lib/data'
 import { statusBadgeClass }     from '@/lib/utils'
 import type { SpecialOrder }    from '@/types'
@@ -101,6 +102,7 @@ function ViewSOModal({ so, open, onClose }: { so: SOWithUrl | null; open: boolea
 // ── Main Page ─────────────────────────────────
 export default function SpecialOrdersPage() {
   const { toast }  = useToast()
+  const { user }   = useAuth()
   const [orders, setOrders]       = useState<SOWithUrl[]>([])
   const [loading, setLoading]     = useState(true)
   const [statusFilter, setStatus] = useState('ALL')
@@ -110,7 +112,13 @@ export default function SpecialOrdersPage() {
   const archiveDisc = useDisclosure<SOWithUrl>()
 
   const { query, setQuery, filtered: searched } = useSearch(orders, ['reference', 'subject'] as Array<keyof SOWithUrl>)
-  const filtered = searched.filter(so => statusFilter === 'ALL' || so.status === statusFilter)
+  const filtered = searched.filter(so => {
+    // Always hide archived files from main view
+    if (so.status === 'ARCHIVED') return false
+    // Apply status filter if selected
+    if (statusFilter === 'ALL') return true
+    return so.status === statusFilter
+  })
 
   // Load from Supabase on mount
   useEffect(() => {
@@ -129,10 +137,28 @@ export default function SpecialOrdersPage() {
   // Archive SO — marks as ARCHIVED instead of removing
   async function handleArchive() {
     const so = archiveDisc.payload
-    if (!so) return
-    await archiveSpecialOrder(so.id)
-    setOrders(prev => prev.map(o => o.id === so.id ? { ...o, status: 'ARCHIVED' as const } : o))
-    toast.success(`"${so.reference}" has been archived.`)
+    if (!so || !user) return
+    
+    try {
+      console.log('📦 Archiving special order:', so.id)
+      
+      // Ensure special order is synced to Supabase before archiving
+      console.log('🔄 Ensuring special order is synced to Supabase...')
+      await addSpecialOrder(so)
+      console.log('✅ Special order synced to Supabase')
+      
+      // Now archive it
+      await archiveSpecialOrder(so.id, user.name)
+      console.log('✅ Successfully archived:', so.reference)
+      
+      // Remove from local view ONLY after successful archive
+      setOrders(prev => prev.map(o => o.id === so.id ? { ...o, status: 'ARCHIVED' as const } : o))
+      toast.success(`"${so.reference}" has been archived.`)
+    } catch (err) {
+      console.error('❌ Archive failed:', err)
+      toast.error('Failed to archive order. Please try again.')
+    }
+    
     archiveDisc.close()
   }
 
@@ -149,7 +175,6 @@ export default function SpecialOrdersPage() {
             <ToolbarSelect onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatus(e.target.value)}>
               <option value="ALL">All Status</option>
               <option value="ACTIVE">Active</option>
-              <option value="ARCHIVED">Archived</option>
             </ToolbarSelect>
             <Button variant="primary" size="sm" className="ml-auto" onClick={newSOModal.open}>
               + New SO

@@ -12,10 +12,11 @@ import { ToolbarSelect }         from '@/components/ui/Toolbar'
 import { Modal }                 from '@/components/ui/Modal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }              from '@/components/ui/Toast'
+import { useAuth }               from '@/lib/auth'
 import {
   getLibraryItems,
   addLibraryItem,
-  addArchivedDoc,
+  archiveLibraryItem,
 } from '@/lib/data'
 import { supabase }              from '@/lib/supabase'
 import { libraryBadgeClass }     from '@/lib/utils'
@@ -296,6 +297,7 @@ function ViewItemModal({
 // ── Main Page ─────────────────────────────────
 export default function LibraryPage() {
   const { toast }  = useToast()
+  const { user }   = useAuth()
   const [items, setItems]     = useState<LibraryItemWithUrl[]>([])
   const [loading, setLoading] = useState(true)
   const [catFilter, setCat]   = useState<LibraryCategory | 'ALL'>('ALL')
@@ -308,7 +310,10 @@ export default function LibraryPage() {
     items,
     ['title'] as Array<keyof LibraryItemWithUrl>
   )
-  const filtered = searched.filter(i => catFilter === 'ALL' || i.category === catFilter)
+  // Hide archived items from main view
+  const filtered = searched
+    .filter(i => !i.archived)
+    .filter(i => catFilter === 'ALL' || i.category === catFilter)
 
   useEffect(() => {
     getLibraryItems().then(data => {
@@ -323,39 +328,38 @@ export default function LibraryPage() {
 
   async function handleArchive() {
     const item = archiveDisc.payload
-    if (!item) return
+    if (!item || !user) return
 
-    const today = new Date().toISOString().split('T')[0]
-
-    // Insert into archived_docs
-    await addArchivedDoc({
-      id:           `arc-${Date.now()}`,
-      title:        item.title,
-      type:         'Library Item',
-      archivedDate: today,
-      archivedBy:   'Admin',
-    })
-
-    // Remove from library_items
-    const { error } = await supabase
-      .from('library_items')
-      .delete()
-      .eq('id', item.id)
-
-    if (error) {
-      console.warn('Supabase unavailable (archive library_item):', error.message)
+    try {
+      console.log('📦 Archiving library item:', item.id)
+      
+      // Ensure item is synced to Supabase before archiving
+      console.log('🔄 Ensuring library item is synced to Supabase...')
+      await addLibraryItem(item)
+      console.log('✅ Library item synced to Supabase')
+      
+      // Now archive it
+      await archiveLibraryItem(item.id, user.name)
+      console.log('✅ Successfully archived:', item.title)
+      
+      // Remove from local view ONLY after successful archive
+      const updatedItems = items.map(i => i.id === item.id ? { ...i, archived: true } : i)
+      setItems(updatedItems)
+      
+      toast.success(`"${item.title}" has been archived.`)
+    } catch (err) {
+      console.error('❌ Archive failed:', err)
+      toast.error('Failed to archive item. Please try again.')
     }
-
-    setItems(prev => prev.filter(i => i.id !== item.id))
-    toast.success(`"${item.title}" has been archived.`)
+    
     archiveDisc.close()
   }
 
   const categoryStats = {
-    ALL:       items.length,
-    MANUAL:    items.filter(i => i.category === 'MANUAL').length,
-    GUIDELINE: items.filter(i => i.category === 'GUIDELINE').length,
-    TEMPLATE:  items.filter(i => i.category === 'TEMPLATE').length,
+    ALL:       items.filter(i => !i.archived).length,
+    MANUAL:    items.filter(i => i.category === 'MANUAL' && !i.archived).length,
+    GUIDELINE: items.filter(i => i.category === 'GUIDELINE' && !i.archived).length,
+    TEMPLATE:  items.filter(i => i.category === 'TEMPLATE' && !i.archived).length,
   }
 
   return (
