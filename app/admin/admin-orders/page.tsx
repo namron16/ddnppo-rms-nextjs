@@ -13,10 +13,8 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
-import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder } from '@/lib/data'
-=======
 import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder, addArchivedDoc } from '@/lib/data'
->>>>>>> 95854486feda8436983777c16b1af8b447843777
+
 import { statusBadgeClass }     from '@/lib/utils'
 import type { SpecialOrder }    from '@/types'
 
@@ -127,30 +125,6 @@ export default function SpecialOrdersPage() {
 
   async function handleArchive() {
     const so = archiveDisc.payload
-<<<<<<< HEAD
-    if (!so || !user) return
-    
-    try {
-      console.log('📦 Archiving special order:', so.id)
-      
-      // Ensure special order is synced to Supabase before archiving
-      console.log('🔄 Ensuring special order is synced to Supabase...')
-      await addSpecialOrder(so)
-      console.log('✅ Special order synced to Supabase')
-      
-      // Now archive it
-      await archiveSpecialOrder(so.id, user.name)
-      console.log('✅ Successfully archived:', so.reference)
-      
-      // Remove from local view ONLY after successful archive
-      setOrders(prev => prev.map(o => o.id === so.id ? { ...o, status: 'ARCHIVED' as const } : o))
-      toast.success(`"${so.reference}" has been archived.`)
-    } catch (err) {
-      console.error('❌ Archive failed:', err)
-      toast.error('Failed to archive order. Please try again.')
-    }
-    
-=======
     if (!so) return
 
     const today = new Date().toISOString().split('T')[0]
@@ -171,7 +145,6 @@ export default function SpecialOrdersPage() {
     setOrders(prev => prev.filter(o => o.id !== so.id))
 
     toast.success(`"${so.reference}" has been moved to the Archive.`)
->>>>>>> 95854486feda8436983777c16b1af8b447843777
     archiveDisc.close()
   }
 
