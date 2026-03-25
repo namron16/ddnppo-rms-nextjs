@@ -13,7 +13,7 @@ import { Modal }                   from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }                from '@/components/ui/Toast'
-import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc, addArchivedDoc } from '@/lib/data'
+import { getConfidentialDocs, addConfidentialDoc, archiveConfidentialDoc, addArchivedDoc, getArchivedDocs } from '@/lib/data'
 import { classificationBadgeClass } from '@/lib/utils'
 import type { ConfidentialDoc }    from '@/types'
 
@@ -217,10 +217,20 @@ export default function ConfidentialPage() {
   useEffect(() => {
     async function load() {
       try {
-        const remoteDocs = await getConfidentialDocs()
+        const [remoteDocs, archived] = await Promise.all([
+          getConfidentialDocs(),
+          getArchivedDocs(),
+        ])
+        const archivedIds = new Set(
+          (archived ?? [])
+            .map((a: any) => String(a.id ?? ''))
+            .filter((id: string) => id.startsWith('arc-cd-'))
+            .map((id: string) => id.replace('arc-cd-', ''))
+        )
+
         if (remoteDocs.length > 0) {
           // Only show non-archived docs on this page
-          const active = (remoteDocs as ConfDocWithUrl[]).filter(d => !d.archived)
+          const active = (remoteDocs as ConfDocWithUrl[]).filter(d => !d.archived && !archivedIds.has(d.id))
           setDocs(active)
           saveLocalDocs(active)
         } else {

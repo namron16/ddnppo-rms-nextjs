@@ -126,7 +126,7 @@ export default function ArchivePage() {
         title="Restore Document"
         message={`Restore "${restoreDisc.payload?.title}" to its original location?`}
         confirmLabel="Restore" variant="primary"
-        onConfirm={() => { toast.success('Document restored successfully.'); restoreDisc.close() }}
+        onConfirm={handleRestore}
         onCancel={restoreDisc.close}
       />
       <ConfirmDialog
@@ -134,7 +134,7 @@ export default function ArchivePage() {
         title="Permanently Delete"
         message={`Permanently delete "${deleteDisc.payload?.title}"? This cannot be undone.`}
         confirmLabel="Delete Forever" variant="danger"
-        onConfirm={() => { toast.success('Document permanently deleted.'); deleteDisc.close() }}
+        onConfirm={handleDelete}
         onCancel={deleteDisc.close}
       />
     </>

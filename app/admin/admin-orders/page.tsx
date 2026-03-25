@@ -13,7 +13,7 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
-import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder, addArchivedDoc } from '@/lib/data'
+import { getSpecialOrders, addSpecialOrder, archiveSpecialOrder, addArchivedDoc, getArchivedDocs } from '@/lib/data'
 
 import { statusBadgeClass }     from '@/lib/utils'
 import type { SpecialOrder }    from '@/types'
@@ -111,9 +111,16 @@ export default function SpecialOrdersPage() {
   const filtered = searched.filter(so => statusFilter === 'ALL' || so.status === statusFilter)
 
   useEffect(() => {
-    getSpecialOrders().then(data => {
-      // Only show non-archived orders on this page
-      setOrders(data.filter(o => o.status !== 'ARCHIVED'))
+    Promise.all([getSpecialOrders(), getArchivedDocs()]).then(([data, archived]) => {
+      const archivedIds = new Set(
+        (archived ?? [])
+          .map((a: any) => String(a.id ?? ''))
+          .filter((id: string) => id.startsWith('arc-so-'))
+          .map((id: string) => id.replace('arc-so-', ''))
+      )
+
+      // Only show active/non-archived records on this page.
+      setOrders(data.filter(o => o.status !== 'ARCHIVED' && !archivedIds.has(o.id)))
       setLoading(false)
     })
   }, [])

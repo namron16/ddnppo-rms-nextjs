@@ -43,6 +43,15 @@ export async function updateMasterDocument(doc: MasterDocument & { fileUrl?: str
   if (error) console.warn('Supabase unavailable (update master_document):', error.message)
 }
 
+// Soft-archive master document by setting archived flag when available.
+export async function archiveMasterDocument(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('master_documents')
+    .update({ archived: true })
+    .eq('id', id)
+  if (error) console.warn('Supabase unavailable (archive master_document):', error.message)
+}
+
 export async function deleteMasterDocument(id: string): Promise<void> {
   const { error } = await supabase.from('master_documents').delete().eq('id', id)
   if (error) console.warn('Supabase unavailable (delete master_document):', error.message)
@@ -86,7 +95,7 @@ export async function archiveSpecialOrder(id: string): Promise<void> {
 /* ════════════════════════════════════════════
    CONFIDENTIAL DOCUMENTS
 ════════════════════════════════════════════ */
-export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUrl?: string; passwordHash?: string })[]> {
+export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUrl?: string; passwordHash?: string; archived?: boolean })[]> {
   const { data, error } = await supabase
     .from('confidential_docs').select('*').order('created_at', { ascending: false })
   if (error) { console.warn('Supabase unavailable (confidential_docs):', error.message); return [] }
@@ -95,6 +104,7 @@ export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUr
     date: d.date, access: d.access,
     fileUrl:      d.file_url      ?? undefined,
     passwordHash: d.password_hash ?? undefined,
+    archived:     d.archived      ?? false,
   }))
 }
 
@@ -160,6 +170,15 @@ export async function deleteLibraryItem(id: string): Promise<void> {
   if (error) console.warn('Supabase unavailable (delete library_item):', error.message)
 }
 
+// Soft-archive library item by setting archived flag when available.
+export async function archiveLibraryItem(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('library_items')
+    .update({ archived: true })
+    .eq('id', id)
+  if (error) console.warn('Supabase unavailable (archive library_item):', error.message)
+}
+
 /* ════════════════════════════════════════════
    ACTIVITY LOGS
 ════════════════════════════════════════════ */
@@ -208,8 +227,64 @@ export async function deleteArchivedDoc(id: string): Promise<void> {
 }
 
 export async function restoreArchivedDoc(id: string): Promise<void> {
+  const { data: archived, error: fetchError } = await supabase
+    .from('archived_docs')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError) {
+    console.warn('Supabase unavailable (fetch archived_doc):', fetchError.message)
+  }
+
+  const archiveType = String(archived?.type ?? '').toLowerCase()
+
+  if (id.startsWith('arc-so-') || archiveType === 'special order') {
+    const sourceId = id.startsWith('arc-so-') ? id.replace('arc-so-', '') : undefined
+    if (sourceId) {
+      const { error } = await supabase
+        .from('special_orders')
+        .update({ status: 'ACTIVE' })
+        .eq('id', sourceId)
+      if (error) console.warn('Supabase unavailable (restore special_order):', error.message)
+    }
+  }
+
+  if (id.startsWith('arc-cd-') || archiveType === 'classified document') {
+    const sourceId = id.startsWith('arc-cd-') ? id.replace('arc-cd-', '') : undefined
+    if (sourceId) {
+      const { error } = await supabase
+        .from('confidential_docs')
+        .update({ archived: false })
+        .eq('id', sourceId)
+      if (error) console.warn('Supabase unavailable (restore confidential_doc):', error.message)
+    }
+  }
+
+  if (id.startsWith('arc-md-') || archiveType === 'master document') {
+    const sourceId = id.startsWith('arc-md-') ? id.replace('arc-md-', '') : undefined
+    if (sourceId) {
+      const { error } = await supabase
+        .from('master_documents')
+        .update({ archived: false })
+        .eq('id', sourceId)
+      if (error) console.warn('Supabase unavailable (restore master_document):', error.message)
+    }
+  }
+
+  if (id.startsWith('arc-lib-') || archiveType === 'library item') {
+    const sourceId = id.startsWith('arc-lib-') ? id.replace('arc-lib-', '') : undefined
+    if (sourceId) {
+      const { error } = await supabase
+        .from('library_items')
+        .update({ archived: false })
+        .eq('id', sourceId)
+      if (error) console.warn('Supabase unavailable (restore library_item):', error.message)
+    }
+  }
+
   const { error } = await supabase.from('archived_docs').delete().eq('id', id)
-  if (error) console.warn('Supabase unavailable (restore archived_doc):', error.message)
+  if (error) console.warn('Supabase unavailable (delete archived_doc on restore):', error.message)
 }
 
 /* ════════════════════════════════════════════

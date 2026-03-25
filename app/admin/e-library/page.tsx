@@ -16,6 +16,8 @@ import {
   getLibraryItems,
   addLibraryItem,
   addArchivedDoc,
+  archiveLibraryItem,
+  getArchivedDocs,
 } from '@/lib/data'
 import { supabase }              from '@/lib/supabase'
 import { libraryBadgeClass }     from '@/lib/utils'
@@ -311,8 +313,14 @@ export default function LibraryPage() {
   const filtered = searched.filter(i => catFilter === 'ALL' || i.category === catFilter)
 
   useEffect(() => {
-    getLibraryItems().then(data => {
-      setItems(data as LibraryItemWithUrl[])
+    Promise.all([getLibraryItems(), getArchivedDocs()]).then(([data, archived]) => {
+      const archivedIds = new Set(
+        (archived ?? [])
+          .map((a: any) => String(a.id ?? ''))
+          .filter((id: string) => id.startsWith('arc-lib-'))
+          .map((id: string) => id.replace('arc-lib-', ''))
+      )
+      setItems((data as LibraryItemWithUrl[]).filter(item => !archivedIds.has(item.id)))
       setLoading(false)
     })
   }, [])
@@ -329,22 +337,14 @@ export default function LibraryPage() {
 
     // Insert into archived_docs
     await addArchivedDoc({
-      id:           `arc-${Date.now()}`,
+      id:           `arc-lib-${item.id}`,
       title:        item.title,
       type:         'Library Item',
       archivedDate: today,
       archivedBy:   'Admin',
     })
 
-    // Remove from library_items
-    const { error } = await supabase
-      .from('library_items')
-      .delete()
-      .eq('id', item.id)
-
-    if (error) {
-      console.warn('Supabase unavailable (archive library_item):', error.message)
-    }
+    await archiveLibraryItem(item.id)
 
     setItems(prev => prev.filter(i => i.id !== item.id))
     toast.success(`"${item.title}" has been archived.`)

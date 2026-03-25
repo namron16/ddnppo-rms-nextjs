@@ -20,8 +20,9 @@ import {
   getMasterDocuments,
   addMasterDocument,
   updateMasterDocument,
-  deleteMasterDocument,
+  archiveMasterDocument,
   addArchivedDoc,
+  getArchivedDocs,
 } from '@/lib/data'
 import type { MasterDocument, DocLevel } from '@/types'
 
@@ -366,9 +367,20 @@ export default function MasterPage() {
   useEffect(() => {
     async function loadAll() {
       // Documents
-      const docs = await getMasterDocuments()
-      setDocuments(docs)
-      if (docs.length > 0) setSelected(docs[0])
+      const [docs, archived] = await Promise.all([
+        getMasterDocuments(),
+        getArchivedDocs(),
+      ])
+      const archivedIds = new Set(
+        (archived ?? [])
+          .map((a: any) => String(a.id ?? ''))
+          .filter((id: string) => id.startsWith('arc-md-'))
+          .map((id: string) => id.replace('arc-md-', ''))
+      )
+
+      const activeDocs = docs.filter((d: DocWithUrl) => !archivedIds.has(d.id))
+      setDocuments(activeDocs)
+      if (activeDocs.length > 0) setSelected(activeDocs[0])
 
       // Real counts from Supabase
       const [soRes, cdRes] = await Promise.all([
@@ -412,13 +424,13 @@ export default function MasterPage() {
     if (!selected) return
     const date = new Date().toISOString().split('T')[0]
     await addArchivedDoc({
-      id:           `arc-${Date.now()}`,
+      id:           `arc-md-${selected.id}`,
       title:        selected.title,
-      type:         selected.type,
+      type:         'Master Document',
       archivedDate: date,
       archivedBy:   'Admin',
     })
-    await deleteMasterDocument(selected.id)
+    await archiveMasterDocument(selected.id)
     setDocuments(prev => prev.filter(d => d.id !== selected.id))
     setSelected(null)
     toast.success('Document archived.')
