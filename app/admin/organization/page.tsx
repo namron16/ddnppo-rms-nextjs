@@ -1,13 +1,14 @@
 'use client'
 // app/admin/organization/page.tsx
+// Auto-layout top-down org chart — orthogonal lines, zoom, confirm dialog.
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Modal }      from '@/components/ui/Modal'
 import { Button }     from '@/components/ui/Button'
 import { useToast }   from '@/components/ui/Toast'
 
-// ── Types ─────────────────────────────────────
+// ── Types ──────────────────────────────────────
 interface OrgMember {
   id: string
   name: string
@@ -17,628 +18,851 @@ interface OrgMember {
   photoUrl?: string
   initials: string
   color: string
-  x: number
-  y: number
   parentId?: string
 }
+
+// ── Layout constants ───────────────────────────
+const CARD_W     = 260
+const CARD_H     = 270
+const H_GAP      = 56
+const V_GAP      = 80
+const CANVAS_PAD = 80
 
 const COLORS = [
   '#3b63b8', '#f0b429', '#8b5cf6', '#10b981',
   '#ef4444', '#0891b2', '#f97316', '#ec4899',
 ]
 
-const LOCAL_KEY = 'ddnppo_org_members'
+const RANK_ORDER = [
+  'P/GEN.',
+  'P/LT. GEN.',
+  'P/MAJ. GEN.',
+  'P/BRIG. GEN.',
+  'P/COL.',
+  'P/LT. COL.',
+  'P/MAJ.',
+  'P/CAPT.',
+  'P/LT.',
+  'P/INSP.',
+  'PSMS',
+  'PMMS',
+  'PEMS',
+  'PSSG',
+  'PCPL',
+  'PAT',
+  'PNCOP',
+]
+
+function normalizeRank(rank?: string) {
+  return (rank ?? '').replace(/\s+/g, ' ').trim().toUpperCase()
+}
+
+function rankPriority(rank?: string) {
+  const idx = RANK_ORDER.indexOf(normalizeRank(rank))
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx
+}
+
+function compareMembersByRank(a: OrgMember, b: OrgMember) {
+  const rankDiff = rankPriority(a.rank) - rankPriority(b.rank)
+  if (rankDiff !== 0) return rankDiff
+
+  const posDiff = a.position.localeCompare(b.position, undefined, { sensitivity: 'base' })
+  if (posDiff !== 0) return posDiff
+
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+}
+
+function getDisplayMembersWithAutoHierarchy(members: OrgMember[]): OrgMember[] {
+  if (members.length <= 1) return members
+
+  const byId = new Map(members.map(m => [m.id, m]))
+  const sorted = [...members].sort(compareMembersByRank)
+  const autoParentById = new Map<string, string | undefined>()
+
+  for (let i = 0; i < sorted.length; i++) {
+    const member = sorted[i]
+
+    // Manual reporting line always wins when valid.
+    if (member.parentId && byId.has(member.parentId)) {
+      autoParentById.set(member.id, member.parentId)
+      continue
+    }
+
+    const memberPriority = rankPriority(member.rank)
+    let parentId: string | undefined
+
+    // Find nearest higher-ranked person and place this member below them.
+    for (let j = i - 1; j >= 0; j--) {
+      const candidate = sorted[j]
+      if (rankPriority(candidate.rank) < memberPriority) {
+        parentId = candidate.id
+        break
+      }
+    }
+
+    autoParentById.set(member.id, parentId)
+  }
+
+  return members.map(member => ({
+    ...member,
+    parentId: autoParentById.get(member.id),
+  }))
+}
+
+const LOCAL_KEY = 'ddnppo_org_members_v2'
 
 function loadMembers(): OrgMember[] {
   if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(LOCAL_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
+  try { return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]') } catch { return [] }
 }
-
-function saveMembers(members: OrgMember[]) {
+function saveMembers(m: OrgMember[]) {
   if (typeof window === 'undefined') return
-  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(members)) } catch { /* noop */ }
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)) } catch {}
 }
-
 function getInitials(name: string) {
-  return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+  return name.split(' ').filter(Boolean).map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
 }
 
-// ── Add/Edit Modal ────────────────────────────
-function MemberModal({ open, onClose, onSave, existing }: {
-  open: boolean
-  onClose: () => void
-  onSave: (member: Omit<OrgMember, 'id' | 'x' | 'y'>) => void
+// ── Auto-layout algorithm ──────────────────────
+interface LayoutNode {
+  member: OrgMember
+  x: number
+  y: number
+  subtreeWidth: number
+}
+
+function buildLayoutMap(members: OrgMember[]): Map<string, LayoutNode> {
+  const byId       = new Map(members.map(m => [m.id, m]))
+  const childrenOf = new Map<string | undefined, OrgMember[]>()
+
+  for (const m of members) {
+    const key = m.parentId
+    if (!childrenOf.has(key)) childrenOf.set(key, [])
+    childrenOf.get(key)!.push(m)
+  }
+
+  for (const [, children] of childrenOf) {
+    children.sort(compareMembersByRank)
+  }
+
+  function subtreeWidth(id: string): number {
+    const children = childrenOf.get(id) ?? []
+    if (children.length === 0) return CARD_W
+    const total = children.reduce((s, c) => s + subtreeWidth(c.id) + H_GAP, -H_GAP)
+    return Math.max(CARD_W, total)
+  }
+
+  const result = new Map<string, LayoutNode>()
+
+  function place(id: string, x: number, y: number) {
+    const member   = byId.get(id)!
+    const children = childrenOf.get(id) ?? []
+    const sw       = subtreeWidth(id)
+    result.set(id, { member, x, y, subtreeWidth: sw })
+    if (children.length === 0) return
+    const totalChildW = children.reduce((s, c) => s + subtreeWidth(c.id) + H_GAP, -H_GAP)
+    let cx = x - totalChildW / 2
+    for (const child of children) {
+      const csw = subtreeWidth(child.id)
+      place(child.id, cx + csw / 2, y + CARD_H + V_GAP)
+      cx += csw + H_GAP
+    }
+  }
+
+  const roots = members
+    .filter(m => !m.parentId || !byId.has(m.parentId))
+    .sort(compareMembersByRank)
+  let rx = 0
+  for (const root of roots) {
+    const sw = subtreeWidth(root.id)
+    place(root.id, rx + sw / 2, 0)
+    rx += sw + H_GAP
+  }
+
+  if (result.size === 0) return result
+  const minX = Math.min(...[...result.values()].map(n => n.x - CARD_W / 2))
+  const shift = -minX + CANVAS_PAD
+  for (const [k, v] of result) {
+    result.set(k, { ...v, x: v.x + shift, y: v.y + CANVAS_PAD })
+  }
+  return result
+}
+
+// ── Orthogonal connector lines ─────────────────
+function Lines({ layout }: { layout: Map<string, LayoutNode> }) {
+  const lines: React.ReactNode[] = []
+  const childrenByParent = new Map<string, LayoutNode[]>()
+
+  for (const [, node] of layout) {
+    if (!node.member.parentId) continue
+    const pid = node.member.parentId
+    if (!childrenByParent.has(pid)) childrenByParent.set(pid, [])
+    childrenByParent.get(pid)!.push(node)
+  }
+
+  for (const [parentId, children] of childrenByParent) {
+    const parent = layout.get(parentId)
+    if (!parent) continue
+
+    const px   = parent.x
+    const py   = parent.y + CARD_H
+    const busY = py + V_GAP / 2
+
+    // Vertical from parent bottom → bus
+    lines.push(
+      <line key={`vdown-${parentId}`}
+        x1={px} y1={py} x2={px} y2={busY}
+        stroke="#94a3b8" strokeWidth="1.5"
+      />
+    )
+
+    // Horizontal bus across all children
+    if (children.length > 1) {
+      const xs  = children.map(c => c.x)
+      const min = Math.min(px, ...xs)
+      const max = Math.max(px, ...xs)
+      lines.push(
+        <line key={`bus-${parentId}`}
+          x1={min} y1={busY} x2={max} y2={busY}
+          stroke="#94a3b8" strokeWidth="1.5"
+        />
+      )
+    }
+
+    // Vertical from bus → each child top
+    for (const child of children) {
+      lines.push(
+        <line key={`vchild-${parentId}-${child.member.id}`}
+          x1={child.x} y1={busY} x2={child.x} y2={child.y}
+          stroke="#94a3b8" strokeWidth="1.5"
+        />
+      )
+    }
+  }
+
+  return <>{lines}</>
+}
+
+// ── Member Card (bigger, more info, inline actions) ──
+const ACTION_H = 36
+
+function MemberCard({ node, selected, onClick, onEdit, onDelete, onAddChild }: {
+  node: LayoutNode
+  selected: boolean
+  onClick: () => void
+  onEdit: () => void
+  onDelete: () => void
+  onAddChild: () => void
+}) {
+  const { member, x, y } = node
+  const avatarCX = CARD_W / 2
+  const avatarCY = 58
+
+  return (
+    <g transform={`translate(${x - CARD_W / 2}, ${y})`} style={{ cursor: 'pointer' }}
+      onClick={e => { e.stopPropagation(); onClick() }}>
+
+      {/* Shadow */}
+      <rect x={3} y={6} width={CARD_W} height={CARD_H} rx={20} fill="rgba(15,23,42,0.13)" />
+
+      {/* Body */}
+      <rect x={0} y={0} width={CARD_W} height={CARD_H} rx={20}
+        fill="white"
+        stroke={selected ? '#2563eb' : '#dbe5f1'}
+        strokeWidth={selected ? 2.8 : 1.6}
+      />
+
+      {/* Selected glow frame */}
+      {selected && (
+        <rect x={-1.5} y={-1.5} width={CARD_W + 3} height={CARD_H + 3} rx={22}
+          fill="none" stroke={member.color + '80'} strokeWidth={1.5} />
+      )}
+
+      {/* Subtle inner frame */}
+      <rect x={8} y={8} width={CARD_W - 16} height={CARD_H - 16} rx={16}
+        fill="none" stroke={member.color + '2b'} strokeWidth={1} />
+
+      {/* Header tint */}
+      <rect x={0} y={0} width={CARD_W} height={122} rx={20} fill={member.color + '1a'} />
+      <rect x={0} y={110} width={CARD_W} height={12} fill={member.color + '1a'} />
+
+      {/* Content panel */}
+      <rect x={10} y={156} width={CARD_W - 20} height={CARD_H - 166} rx={14} fill="#f8fafc" />
+
+      {/* Left accent strip */}
+      <rect x={0} y={0} width={5} height={CARD_H} rx={5} fill={member.color} />
+
+      {/* Avatar ring */}
+      <circle cx={avatarCX} cy={avatarCY} r={54} fill={member.color + '36'} />
+      <circle cx={avatarCX} cy={avatarCY} r={44} fill={member.color} />
+
+      {member.photoUrl ? (
+        <>
+          <clipPath id={`clip-${member.id}`}>
+            <circle cx={avatarCX} cy={avatarCY} r={44} />
+          </clipPath>
+          <image href={member.photoUrl}
+            x={avatarCX - 44} y={avatarCY - 44} width={88} height={88}
+            clipPath={`url(#clip-${member.id})`}
+            preserveAspectRatio="xMidYMid slice"
+          />
+        </>
+      ) : (
+        <text x={avatarCX} y={avatarCY}
+          textAnchor="middle" dominantBaseline="central"
+          fill="white" fontSize={18} fontWeight={800} fontFamily="Inter, sans-serif">
+          {member.initials}
+        </text>
+      )}
+
+      {/* Rank badge */}
+      {member.rank && (
+        <>
+          <rect
+            x={CARD_W / 2 - (member.rank.length * 7.2 + 20) / 2}
+            y={130}
+            width={member.rank.length * 7.2 + 20}
+            height={24}
+            rx={8}
+            fill={member.color + '1f'}
+          />
+          <text x={CARD_W / 2} y={142} textAnchor="middle" dominantBaseline="central"
+            fill={member.color} fontSize={12} fontWeight={800} fontFamily="Inter, sans-serif">
+            {member.rank}
+          </text>
+        </>
+      )}
+
+      {/* Full Name */}
+      <text x={CARD_W / 2} y={member.rank ? 186 : 170} textAnchor="middle"
+        fill="#0f172a" fontSize={18} fontWeight={800} fontFamily="Inter, sans-serif">
+        {member.name.length > 26 ? member.name.slice(0, 25) + '…' : member.name}
+      </text>
+
+      {/* Position */}
+      <text x={CARD_W / 2} y={member.rank ? 214 : 198} textAnchor="middle"
+        fill="#334155" fontSize={14} fontWeight={600} fontFamily="Inter, sans-serif">
+        {member.position.length > 28 ? member.position.slice(0, 27) + '…' : member.position}
+      </text>
+
+      {/* Unit */}
+      {member.unit && (
+        <text x={CARD_W / 2} y={member.rank ? 241 : 225} textAnchor="middle"
+          fill="#64748b" fontSize={12} fontWeight={500} fontFamily="Inter, sans-serif">
+          {member.unit.length > 30 ? member.unit.slice(0, 29) + '…' : member.unit}
+        </text>
+      )}
+
+      {/* Root star */}
+      {!member.parentId && (
+        <text x={CARD_W - 14} y={16} textAnchor="middle" dominantBaseline="central"
+          fill={member.color} fontSize={12} fontFamily="Inter, sans-serif">★</text>
+      )}
+
+      {/* ── Inline action bar (only when selected) ── */}
+      {selected && (
+        <g transform={`translate(0, ${CARD_H + 5})`}>
+          {/* Container */}
+          <rect x={0} y={0} width={CARD_W} height={ACTION_H} rx={10}
+            fill="white" stroke="#e2e8f0" strokeWidth={1.5} />
+
+          {/* Edit */}
+          <g data-action="edit" onClick={e => { e.stopPropagation(); onEdit() }}>
+            <rect x={4} y={2} width={78} height={ACTION_H - 4} rx={7} fill="#eff6ff" />
+            <text x={43} y={ACTION_H / 2 - 1} textAnchor="middle" dominantBaseline="central"
+              fill="#3b63b8" fontSize={11} fontWeight={700} fontFamily="Inter, sans-serif">
+              ✏ Edit
+            </text>
+          </g>
+
+          {/* Add Subordinate */}
+          <g data-action="add" onClick={e => { e.stopPropagation(); onAddChild() }}>
+            <rect x={88} y={2} width={84} height={ACTION_H - 4} rx={7} fill="#f0fdf4" />
+            <text x={130} y={ACTION_H / 2 - 1} textAnchor="middle" dominantBaseline="central"
+              fill="#16a34a" fontSize={11} fontWeight={700} fontFamily="Inter, sans-serif">
+              ➕ Add Sub
+            </text>
+          </g>
+
+          {/* Remove */}
+          <g data-action="remove" onClick={e => { e.stopPropagation(); onDelete() }}>
+            <rect x={178} y={2} width={78} height={ACTION_H - 4} rx={7} fill="#fef2f2" />
+            <text x={217} y={ACTION_H / 2 - 1} textAnchor="middle" dominantBaseline="central"
+              fill="#ef4444" fontSize={11} fontWeight={700} fontFamily="Inter, sans-serif">
+              🗑 Remove
+            </text>
+          </g>
+        </g>
+      )}
+    </g>
+  )
+}
+
+// ── Clear-all confirmation dialog ──────────────
+function ClearAllDialog({ open, onConfirm, onCancel }: {
+  open: boolean; onConfirm: () => void; onCancel: () => void
+}) {
+  if (!open) return null
+  return (
+    <>
+      <div className="fixed inset-0 z-[1100] bg-black/55 backdrop-blur-sm" onClick={onCancel} />
+      <div className="fixed z-[1200] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[430px] max-w-[93vw] bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-up">
+        {/* Red warning banner */}
+        <div className="bg-red-600 px-6 py-5 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl flex-shrink-0">
+            ⚠️
+          </div>
+          <div>
+            <p className="text-white font-bold text-[15px] leading-tight">Clear Entire Org Chart?</p>
+            <p className="text-red-100 text-sm mt-1 leading-snug">
+              All <strong className="text-white">members and connections</strong> will be permanently erased.
+            </p>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5">
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-5">
+            <p className="text-red-800 text-sm font-bold mb-1">⛔ This action cannot be undone.</p>
+            <p className="text-red-700 text-xs leading-relaxed">
+              All personnel cards, reporting lines, and hierarchy structure will be removed
+              from local storage. You will need to rebuild the chart from scratch.
+            </p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="outline" onClick={onCancel}>Cancel — Keep Chart</Button>
+            <button
+              onClick={onConfirm}
+              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold text-sm px-5 py-2 rounded-lg transition shadow shadow-red-300"
+            >
+              🗑 Yes, Clear Everything
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ── Zoom controls overlay ──────────────────────
+const ZOOM_STEP = 0.15
+const ZOOM_MIN  = 0.25
+const ZOOM_MAX  = 2.5
+
+function ZoomControls({ zoom, onZoom, onReset, disabled = false }: {
+  zoom: number; onZoom: (d: number) => void; onReset: () => void; disabled?: boolean
+}) {
+  return (
+    <div className="absolute bottom-4 right-4 z-20 flex items-center gap-0.5 bg-white border border-slate-200 rounded-xl shadow-md px-1.5 py-1.5">
+      <button
+        onClick={() => onZoom(-ZOOM_STEP)}
+        disabled={disabled || zoom <= ZOOM_MIN}
+        title="Zoom out"
+        className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition text-lg font-bold leading-none"
+      >−</button>
+      <button
+        onClick={onReset}
+        disabled={disabled}
+        title="Reset zoom & pan"
+        className="px-3 py-1 text-xs font-semibold text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition min-w-[52px] text-center disabled:opacity-30 disabled:cursor-not-allowed"
+      >{Math.round(zoom * 100)}%</button>
+      <button
+        onClick={() => onZoom(+ZOOM_STEP)}
+        disabled={disabled || zoom >= ZOOM_MAX}
+        title="Zoom in"
+        className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition text-lg font-bold leading-none"
+      >+</button>
+    </div>
+  )
+}
+
+// ── Add / Edit Modal ───────────────────────────
+function MemberModal({ open, onClose, onSave, existing, members, defaultParentId }: {
+  open: boolean; onClose: () => void
+  onSave: (data: Omit<OrgMember, 'id'>) => void
   existing?: OrgMember | null
+  members: OrgMember[]
+  defaultParentId?: string
 }) {
   const { toast } = useToast()
   const fileRef   = useRef<HTMLInputElement>(null)
   const [form, setForm] = useState({
     name: '', rank: '', position: '', unit: '',
-    photoUrl: '', color: COLORS[0],
+    color: COLORS[0], photoUrl: '', parentId: '',
   })
-  const [preview, setPreview] = useState<string>('')
+  const [preview, setPreview] = useState('')
 
   useEffect(() => {
+    if (!open) return
     if (existing) {
-      setForm({
-        name:     existing.name,
-        rank:     existing.rank,
-        position: existing.position,
-        unit:     existing.unit ?? '',
-        photoUrl: existing.photoUrl ?? '',
-        color:    existing.color,
-      })
+      setForm({ name: existing.name, rank: existing.rank, position: existing.position,
+        unit: existing.unit ?? '', color: existing.color, photoUrl: existing.photoUrl ?? '',
+        parentId: existing.parentId ?? '' })
       setPreview(existing.photoUrl ?? '')
     } else {
-      setForm({ name: '', rank: '', position: '', unit: '', photoUrl: '', color: COLORS[0] })
+      setForm(f => ({ ...f, name: '', rank: '', position: '', unit: '',
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        photoUrl: '', parentId: defaultParentId ?? '' }))
       setPreview('')
     }
-  }, [existing, open])
+  }, [open, existing, defaultParentId])
 
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0]; if (!file) return
     const reader = new FileReader()
-    reader.onload = ev => {
-      const url = ev.target?.result as string
-      setPreview(url)
-      setForm(f => ({ ...f, photoUrl: url }))
-    }
+    reader.onload = ev => { const url = ev.target?.result as string; setPreview(url); setForm(f => ({ ...f, photoUrl: url })) }
     reader.readAsDataURL(file)
   }
 
   function submit() {
     if (!form.name.trim())     { toast.error('Name is required.'); return }
     if (!form.position.trim()) { toast.error('Position is required.'); return }
-    onSave({
-      name:     form.name.trim(),
-      rank:     form.rank.trim(),
-      position: form.position.trim(),
-      unit:     form.unit.trim(),
-      photoUrl: form.photoUrl || undefined,
-      initials: getInitials(form.name),
-      color:    form.color,
-      parentId: existing?.parentId,
-    })
+    onSave({ name: form.name.trim(), rank: form.rank.trim(), position: form.position.trim(),
+      unit: form.unit.trim(), color: form.color, photoUrl: form.photoUrl || undefined,
+      initials: getInitials(form.name), parentId: form.parentId || undefined })
     onClose()
   }
+
+  // Prevent cycles
+  const validParents = members.filter(m => {
+    if (!existing) return true
+    if (m.id === existing.id) return false
+    let cur: OrgMember | undefined = m
+    while (cur?.parentId) {
+      if (cur.parentId === existing.id) return false
+      cur = members.find(x => x.id === cur!.parentId)
+    }
+    return true
+  })
 
   const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
 
   return (
     <Modal open={open} onClose={onClose} title={existing ? 'Edit Member' : 'Add Member'} width="max-w-md">
       <div className="p-6 space-y-4">
-
-        {/* Photo Upload */}
-        <div className="flex flex-col items-center gap-3">
-          <div
-            onClick={() => fileRef.current?.click()}
-            className="w-24 h-24 rounded-full border-4 border-dashed border-slate-300 hover:border-blue-400 cursor-pointer flex items-center justify-center overflow-hidden transition relative group"
-            style={{ background: preview ? 'transparent' : form.color + '22' }}
-          >
-            {preview ? (
-              <img src={preview} alt="preview" className="w-full h-full object-cover rounded-full" />
-            ) : (
-              <span className="text-2xl font-bold" style={{ color: form.color }}>
-                {form.name ? getInitials(form.name) : '📷'}
-              </span>
-            )}
+        {/* Photo */}
+        <div className="flex flex-col items-center gap-2">
+          <div onClick={() => fileRef.current?.click()}
+            className="w-20 h-20 rounded-full border-4 border-dashed border-slate-300 hover:border-blue-400 cursor-pointer flex items-center justify-center overflow-hidden transition relative group"
+            style={{ background: preview ? 'transparent' : form.color + '22' }}>
+            {preview
+              ? <img src={preview} alt="preview" className="w-full h-full object-cover rounded-full" />
+              : <span className="text-xl font-bold" style={{ color: form.color }}>{form.name ? getInitials(form.name) : '📷'}</span>}
             <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
               <span className="text-white text-xs font-semibold">Change</span>
             </div>
           </div>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="text-xs text-blue-600 hover:underline font-medium"
-          >
+          <button onClick={() => fileRef.current?.click()} className="text-xs text-blue-600 hover:underline">
             {preview ? 'Change Photo' : 'Upload Photo'}
           </button>
-          {preview && (
-            <button
-              onClick={() => { setPreview(''); setForm(f => ({ ...f, photoUrl: '' })) }}
-              className="text-xs text-red-500 hover:underline"
-            >
-              Remove Photo
-            </button>
-          )}
+          {preview && <button onClick={() => { setPreview(''); setForm(f => ({ ...f, photoUrl: '' })) }} className="text-xs text-red-500 hover:underline">Remove</button>}
         </div>
 
-        {/* Color Picker */}
+        {/* Color */}
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Avatar Color</label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Card Color</label>
           <div className="flex gap-2 flex-wrap">
             {COLORS.map(c => (
-              <button
-                key={c}
-                onClick={() => setForm(f => ({ ...f, color: c }))}
-                className="w-7 h-7 rounded-full border-2 transition"
-                style={{
-                  background: c,
-                  borderColor: form.color === c ? '#0f1c35' : 'transparent',
-                  transform: form.color === c ? 'scale(1.2)' : 'scale(1)',
-                }}
-              />
+              <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))}
+                className="w-7 h-7 rounded-full border-2 transition-transform"
+                style={{ background: c, borderColor: form.color === c ? '#0f172a' : 'transparent', transform: form.color === c ? 'scale(1.25)' : 'scale(1)' }} />
             ))}
           </div>
         </div>
 
-        {/* Name */}
+        {/* Reports To */}
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
-            Full Name <span className="text-red-500">*</span>
-          </label>
-          <input className={cls} placeholder="e.g. Ramon Dela Cruz"
-            value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Reports To</label>
+          <select className={cls} value={form.parentId} onChange={e => setForm(f => ({ ...f, parentId: e.target.value }))}>
+            <option value="">— None (Root / Top-level) —</option>
+            {validParents.map(m => (
+              <option key={m.id} value={m.id}>{m.rank ? `${m.rank} ` : ''}{m.name} — {m.position}</option>
+            ))}
+          </select>
         </div>
 
-        {/* Rank */}
+        {/* Rank + Name */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Rank</label>
             <select className={cls} value={form.rank} onChange={e => setForm(f => ({ ...f, rank: e.target.value }))}>
               <option value="">None</option>
-              {['P/Col.','P/Lt. Col.','P/Maj.','P/Capt.','P/Lt.','P/Insp.','PSMS','PMMS','PEMS','PNCOP'].map(r => (
-                <option key={r}>{r}</option>
-              ))}
+              {['P/Col.','P/Lt. Col.','P/Maj.','P/Capt.','P/Lt.','P/Insp.','PSMS','PMMS','PEMS','PNCOP'].map(r => <option key={r}>{r}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
-              Position <span className="text-red-500">*</span>
-            </label>
-            <input className={cls} placeholder="e.g. Provincial Director"
-              value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} />
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Full Name <span className="text-red-500">*</span></label>
+            <input className={cls} placeholder="e.g. Ramon Dela Cruz" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
+        </div>
+
+        {/* Position */}
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Position <span className="text-red-500">*</span></label>
+          <input className={cls} placeholder="e.g. Provincial Director" value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} />
         </div>
 
         {/* Unit */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Unit / Assignment</label>
-          <input className={cls} placeholder="e.g. DDNPPO HQ"
-            value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
+          <input className={cls} placeholder="e.g. DDNPPO HQ" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
         </div>
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>
-            {existing ? '💾 Save Changes' : '➕ Add Member'}
-          </Button>
+          <Button variant="primary" onClick={submit}>{existing ? '💾 Save Changes' : '➕ Add Member'}</Button>
         </div>
       </div>
     </Modal>
   )
 }
 
-// ── Member Card (canvas node) ─────────────────
-function MemberCard({
-  member, selected, connecting, isTarget,
-  onClick, onEdit, onDelete, onStartConnect,
-}: {
-  member: OrgMember
-  selected: boolean
-  connecting: boolean
-  isTarget: boolean
-  onClick: () => void
-  onEdit: () => void
-  onDelete: () => void
-  onStartConnect: () => void
-}) {
-  return (
-    <div
-      className={`absolute select-none cursor-pointer transition-all duration-150 ${
-        selected ? 'z-20' : 'z-10'
-      } ${isTarget ? 'scale-105' : ''}`}
-      style={{ left: member.x, top: member.y, transform: 'translate(-50%, -50%)' }}
-      onClick={e => { e.stopPropagation(); onClick() }}
-    >
-      <div className={`
-        bg-white rounded-2xl border-2 p-3 w-[148px] text-center shadow-md
-        transition-all duration-150
-        ${selected
-          ? 'border-blue-500 shadow-blue-200 shadow-lg'
-          : isTarget
-          ? 'border-emerald-400 shadow-emerald-100 shadow-lg'
-          : 'border-slate-200 hover:border-blue-300 hover:shadow-lg'
-        }
-      `}>
-        {/* Avatar */}
-        <div className="relative mx-auto mb-2">
-          <div
-            className="w-14 h-14 rounded-full mx-auto flex items-center justify-center text-lg font-bold text-white overflow-hidden border-2 border-white shadow"
-            style={{ background: member.color }}
-          >
-            {member.photoUrl ? (
-              <img src={member.photoUrl} alt={member.name} className="w-full h-full object-cover" />
-            ) : (
-              member.initials
-            )}
-          </div>
-          {selected && (
-            <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white" />
-          )}
-        </div>
-
-        {/* Info */}
-        {member.rank && (
-          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">{member.rank}</div>
-        )}
-        <div className="text-[12px] font-bold text-slate-800 leading-tight truncate">{member.name}</div>
-        <div className="text-[10px] text-slate-500 mt-0.5 truncate">{member.position}</div>
-        {member.unit && (
-          <div className="text-[9px] text-slate-400 mt-0.5 truncate">{member.unit}</div>
-        )}
-
-        {/* Actions (visible when selected) */}
-        {selected && (
-          <div className="flex justify-center gap-1 mt-2.5 pt-2 border-t border-slate-100">
-            <button
-              onClick={e => { e.stopPropagation(); onEdit() }}
-              className="text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 font-semibold transition"
-            >✏️ Edit</button>
-            <button
-              onClick={e => { e.stopPropagation(); onStartConnect() }}
-              title="Connect to parent"
-              className={`text-[10px] px-2 py-1 rounded-md font-semibold transition ${
-                connecting
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >🔗</button>
-            <button
-              onClick={e => { e.stopPropagation(); onDelete() }}
-              className="text-[10px] px-2 py-1 bg-red-50 text-red-500 rounded-md hover:bg-red-100 font-semibold transition"
-            >🗑</button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── SVG Connection Lines ──────────────────────
-function ConnectionLines({ members, draggingId, connectingFrom, mousePos }: {
-  members: OrgMember[]
-  draggingId: string | null
-  connectingFrom: string | null
-  mousePos: { x: number; y: number }
-}) {
-  const connections = members.filter(m => m.parentId)
-
-  return (
-    <svg
-      className="absolute inset-0 pointer-events-none"
-      style={{ width: '100%', height: '100%', overflow: 'visible' }}
-    >
-      <defs>
-        <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="#94a3b8" />
-        </marker>
-        <marker id="arrowhead-active" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="#10b981" />
-        </marker>
-      </defs>
-
-      {connections.map(child => {
-        const parent = members.find(m => m.id === child.parentId)
-        if (!parent) return null
-
-        const x1 = parent.x
-        const y1 = parent.y + 60   // bottom of parent card
-        const x2 = child.x
-        const y2 = child.y - 60    // top of child card
-
-        const midY = (y1 + y2) / 2
-
-        return (
-          <path
-            key={`${parent.id}-${child.id}`}
-            d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
-            fill="none"
-            stroke="#cbd5e1"
-            strokeWidth="2"
-            strokeDasharray="none"
-            markerEnd="url(#arrowhead)"
-          />
-        )
-      })}
-
-      {/* Live connection line while linking */}
-      {connectingFrom && (() => {
-        const from = members.find(m => m.id === connectingFrom)
-        if (!from) return null
-        return (
-          <path
-            d={`M ${from.x} ${from.y} L ${mousePos.x} ${mousePos.y}`}
-            fill="none"
-            stroke="#10b981"
-            strokeWidth="2"
-            strokeDasharray="6 3"
-            markerEnd="url(#arrowhead-active)"
-          />
-        )
-      })()}
-    </svg>
-  )
-}
-
-// ── Main Page ─────────────────────────────────
+// ── Main Page ──────────────────────────────────
 export default function OrganizationPage() {
-  const { toast }  = useToast()
-  const canvasRef  = useRef<HTMLDivElement>(null)
+  const { toast } = useToast()
 
-  const [members, setMembers]             = useState<OrgMember[]>([])
-  const [selected, setSelected]           = useState<string | null>(null)
-  const [editTarget, setEditTarget]       = useState<OrgMember | null>(null)
-  const [showModal, setShowModal]         = useState(false)
-  const [connectingFrom, setConnectingFrom] = useState<string | null>(null)
-  const [mousePos, setMousePos]           = useState({ x: 0, y: 0 })
-  const [dragging, setDragging]           = useState<{ id: string; ox: number; oy: number } | null>(null)
-  const [showHelp, setShowHelp]           = useState(false)
+  const [members,    setMembers]    = useState<OrgMember[]>([])
+  const [selected,   setSelected]   = useState<string | null>(null)
+  const [editTarget, setEditTarget] = useState<OrgMember | null>(null)
+  const [showModal,  setShowModal]  = useState(false)
+  const [showClear,  setShowClear]  = useState(false)
+  const [defaultParentId, setDefaultParentId] = useState<string | undefined>()
+  const [isLayoutEdit, setIsLayoutEdit] = useState(false)
 
-  // Load from localStorage
+  const [pan,       setPan]     = useState({ x: 0, y: 0 })
+  const [zoom,      setZoom]    = useState(1)
+  const [isPanning, setPanning] = useState(false)
+  const [viewport,  setViewport] = useState({ w: 0, h: 0 })
+  const panStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
+  const canvasRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { setMembers(loadMembers()) }, [])
+  useEffect(() => { saveMembers(members) }, [members])
   useEffect(() => {
-    const saved = loadMembers()
-    if (saved.length > 0) {
-      setMembers(saved)
+    const el = canvasRef.current
+    if (!el) return
+
+    const updateViewport = () => {
+      setViewport({ w: el.clientWidth, h: el.clientHeight })
     }
+
+    updateViewport()
+    const ro = new ResizeObserver(updateViewport)
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
-  // Save whenever members change
-  useEffect(() => {
-    if (members.length >= 0) saveMembers(members)
-  }, [members])
+  const displayMembers = getDisplayMembersWithAutoHierarchy(members)
+  const layout = buildLayoutMap(displayMembers)
 
-  // Mouse move for dragging + connecting
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-
-    setMousePos({ x, y })
-
-    if (dragging) {
-      setMembers(prev => prev.map(m =>
-        m.id === dragging.id
-          ? { ...m, x: e.clientX - rect.left - dragging.ox, y: e.clientY - rect.top - dragging.oy }
-          : m
-      ))
-    }
-  }, [dragging])
-
-  const handleMouseUp = useCallback(() => {
-    if (dragging) {
-      setDragging(null)
-      setMembers(prev => { saveMembers(prev); return prev })
-    }
-  }, [dragging])
-
-  function handleCanvasClick() {
-    setSelected(null)
-    if (connectingFrom) setConnectingFrom(null)
+  let canvasW = 900, canvasH = 600
+  if (layout.size > 0) {
+    const nodes = [...layout.values()]
+    canvasW = Math.max(...nodes.map(n => n.x + CARD_W / 2)) + CANVAS_PAD
+    canvasH = Math.max(...nodes.map(n => n.y + CARD_H + ACTION_H + 20)) + CANVAS_PAD
   }
 
-  function handleCardMouseDown(e: React.MouseEvent, member: OrgMember) {
-    if (connectingFrom) return // don't drag while connecting
-    e.stopPropagation()
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setDragging({
-      id: member.id,
-      ox: e.clientX - rect.left - member.x,
-      oy: e.clientY - rect.top - member.y,
-    })
+  const fitScaleX = viewport.w > 0 ? (viewport.w - 32) / canvasW : 1
+  const fitScaleY = viewport.h > 0 ? (viewport.h - 32) / canvasH : 1
+  const lockedZoom = Math.min(1, fitScaleX, fitScaleY)
+  const effectiveZoom = isLayoutEdit ? zoom : Math.max(0.35, lockedZoom)
+  const centeredPan = {
+    x: (viewport.w - canvasW * effectiveZoom) / 2,
+    y: (viewport.h - canvasH * effectiveZoom) / 2,
+  }
+  const effectivePan = isLayoutEdit ? pan : centeredPan
+
+  function onMouseDown(e: React.MouseEvent) {
+    if (!isLayoutEdit) return
+    if ((e.target as Element).closest('[data-action]')) return
+    if (e.button !== 0) return
+    setPanning(true)
+    panStart.current = { mx: e.clientX, my: e.clientY, px: pan.x, py: pan.y }
+  }
+  function onMouseMove(e: React.MouseEvent) {
+    if (!isPanning) return
+    setPan({ x: panStart.current.px + e.clientX - panStart.current.mx,
+             y: panStart.current.py + e.clientY - panStart.current.my })
+  }
+  function onMouseUp() { setPanning(false) }
+
+  function handleZoom(delta: number) {
+    setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(z + delta).toFixed(2))))
+  }
+  function handleResetZoom() { setZoom(1); setPan({ x: 0, y: 0 }) }
+
+  function onWheel(e: React.WheelEvent) {
+    if (!isLayoutEdit) return
+    e.preventDefault()
+    handleZoom(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
   }
 
-  function handleCardClick(member: OrgMember) {
-    if (connectingFrom && connectingFrom !== member.id) {
-      // Connect: set this member's parent to the connecting source
-      setMembers(prev => prev.map(m =>
-        m.id === member.id ? { ...m, parentId: connectingFrom } : m
-      ))
-      toast.success(`Connected to ${members.find(m => m.id === connectingFrom)?.name ?? ''}`)
-      setConnectingFrom(null)
-      setSelected(null)
-    } else {
-      setSelected(member.id === selected ? null : member.id)
-    }
+  function openAddModal(parentId?: string) {
+    setEditTarget(null); setDefaultParentId(parentId); setShowModal(true)
   }
 
-  function handleAddMember() {
-    setEditTarget(null)
-    setShowModal(true)
-  }
-
-  function handleSaveMember(data: Omit<OrgMember, 'id' | 'x' | 'y'>) {
+  function handleSave(data: Omit<OrgMember, 'id'>) {
     if (editTarget) {
-      setMembers(prev => prev.map(m =>
-        m.id === editTarget.id ? { ...m, ...data } : m
-      ))
+      setMembers(prev => prev.map(m => m.id === editTarget.id ? { ...m, ...data } : m))
       toast.success('Member updated.')
     } else {
-      // Place new member in a smart position
-      const baseX = 200 + (members.length % 4) * 200
-      const baseY = 150 + Math.floor(members.length / 4) * 200
-      const newMember: OrgMember = {
-        ...data,
-        id: `org-${Date.now()}`,
-        x: baseX,
-        y: baseY,
-      }
-      setMembers(prev => [...prev, newMember])
+      setMembers(prev => [...prev, { ...data, id: `org-${Date.now()}` }])
       toast.success(`${data.name} added to the org chart.`)
     }
-    setEditTarget(null)
+    setSelected(null)
   }
 
   function handleDelete(id: string) {
-    // Also remove children's parentId references
-    setMembers(prev => prev
-      .filter(m => m.id !== id)
-      .map(m => m.parentId === id ? { ...m, parentId: undefined } : m)
-    )
+    setMembers(prev => prev.filter(m => m.id !== id).map(m => m.parentId === id ? { ...m, parentId: undefined } : m))
     setSelected(null)
     toast.success('Member removed.')
   }
 
-  function handleDisconnect(id: string) {
-    setMembers(prev => prev.map(m =>
-      m.id === id ? { ...m, parentId: undefined } : m
-    ))
-    toast.info('Connection removed.')
-  }
-
-  function handleClearAll() {
-    if (!confirm('Clear the entire org chart? This cannot be undone.')) return
-    setMembers([])
-    setSelected(null)
+  function handleClearConfirmed() {
+    setMembers([]); setSelected(null); setShowClear(false)
     toast.success('Org chart cleared.')
   }
 
-  const selectedMember = members.find(m => m.id === selected)
+  const maxDepth = layout.size === 0 ? 0 : Math.max(...[...layout.values()].map(n => {
+    let depth = 0; let cur = n.member
+    while (cur.parentId) {
+      const p = displayMembers.find(m => m.id === cur!.parentId); if (!p) break; cur = p; depth++
+    }
+    return depth
+  }))
 
   return (
     <>
       <PageHeader title="Personnel Directory" />
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2.5 px-8 py-3 bg-white border-b border-slate-200 sticky top-14 z-40">
-        <Button variant="primary" size="sm" onClick={handleAddMember}>
+      <div className="flex items-center gap-2.5 px-8 py-3 bg-white border-b border-slate-200 sticky top-14 z-40 flex-wrap">
+        <Button variant="primary" size="sm" onClick={() => openAddModal()}>
           ✚ Add Member
         </Button>
 
-        {connectingFrom && (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 font-semibold animate-pulse">
-            🔗 Click another member to connect as child — or&nbsp;
-            <button onClick={() => setConnectingFrom(null)} className="underline hover:no-underline">Cancel</button>
-          </div>
-        )}
+        <button
+          onClick={() => {
+            setIsLayoutEdit(v => {
+              const next = !v
+              if (!next) {
+                setPanning(false)
+                handleResetZoom()
+              }
+              return next
+            })
+          }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+            isLayoutEdit
+              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+          }`}
+        >
+          {isLayoutEdit ? '🛠 Layout Edit: ON' : '🛠 Layout Edit: OFF'}
+        </button>
 
-        {selected && selectedMember && (
-          <div className="flex items-center gap-1.5 ml-2">
-            {selectedMember.parentId && (
-              <Button variant="outline" size="sm" onClick={() => handleDisconnect(selected)}>
-                ✂️ Disconnect
-              </Button>
-            )}
-          </div>
-        )}
-
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setShowHelp(h => !h)}
-            className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200 transition"
-          >
-            {showHelp ? 'Hide Help' : '❓ Help'}
-          </button>
+        <div className="ml-auto flex items-center gap-3 text-xs text-slate-400">
           {members.length > 0 && (
-            <Button variant="danger" size="sm" onClick={handleClearAll}>
-              🗑 Clear All
-            </Button>
+            <>
+              <span className="font-semibold text-slate-600">{members.length} member{members.length !== 1 ? 's' : ''}</span>
+              <span>·</span>
+              <span>{maxDepth + 1} level{maxDepth > 0 ? 's' : ''}</span>
+              <span>·</span>
+              <span className="hidden sm:inline">
+                {isLayoutEdit
+                  ? 'Layout edit: Scroll to zoom · Drag to pan · Click card to select'
+                  : 'Drag/zoom locked · Turn ON Layout Edit to move canvas'}
+              </span>
+              <span className="hidden sm:inline">·</span>
+              <button
+                onClick={() => setShowClear(true)}
+                className="inline-flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-semibold px-3 py-1.5 rounded-lg transition text-xs"
+              >
+                🗑 Clear All
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {/* Help Banner */}
-      {showHelp && (
-        <div className="mx-8 mt-4 px-5 py-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { icon: '✚', text: 'Add Member — create a new person in the chart' },
-            { icon: '🖱️', text: 'Drag cards — move members freely on the canvas' },
-            { icon: '🔗', text: 'Connect — click a card → click 🔗 → click another to link parent→child' },
-            { icon: '✂️', text: 'Disconnect — removes the line between parent and child' },
-          ].map(h => (
-            <div key={h.icon} className="flex items-start gap-2">
-              <span className="text-lg flex-shrink-0">{h.icon}</span>
-              <span className="text-xs leading-relaxed">{h.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Canvas */}
-      <div className="p-8 flex-1">
+      <div className="p-6 flex-1">
         <div
           ref={canvasRef}
-          className="relative bg-white border-[1.5px] border-slate-200 rounded-2xl overflow-hidden"
+          className="relative bg-white border-[1.5px] border-slate-200 rounded-2xl overflow-hidden select-none"
           style={{
-            minHeight: 600,
-            backgroundImage: `
-              radial-gradient(circle, #e2e8f0 1px, transparent 1px)
-            `,
+            minHeight: 580,
+            backgroundImage: 'radial-gradient(circle, #e2e8f0 1px, transparent 1px)',
             backgroundSize: '28px 28px',
-            cursor: connectingFrom ? 'crosshair' : dragging ? 'grabbing' : 'default',
+            cursor: isLayoutEdit ? (isPanning ? 'grabbing' : 'grab') : 'default',
           }}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onClick={handleCanvasClick}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseUp}
+          onWheel={onWheel}
+          onClick={() => setSelected(null)}
         >
-          {/* Connection lines */}
-          <ConnectionLines
-            members={members}
-            draggingId={dragging?.id ?? null}
-            connectingFrom={connectingFrom}
-            mousePos={mousePos}
-          />
-
           {/* Empty state */}
           {members.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
               <div className="text-5xl mb-4">🏛️</div>
               <p className="text-slate-500 font-semibold text-base mb-1">No members yet</p>
-              <p className="text-slate-400 text-sm">Click <strong>+ Add Member</strong> to start building your org chart</p>
+              <p className="text-slate-400 text-sm">
+                Click <strong>+ Add Member</strong> to build your org chart.<br />
+                Use <em>Reports To</em> in the form to assign hierarchy.
+              </p>
             </div>
           )}
 
-          {/* Member cards */}
-          {members.map(member => (
-            <div
-              key={member.id}
-              onMouseDown={e => handleCardMouseDown(e, member)}
-            >
-              <MemberCard
-                member={member}
-                selected={selected === member.id}
-                connecting={connectingFrom === member.id}
-                isTarget={!!connectingFrom && connectingFrom !== member.id}
-                onClick={() => handleCardClick(member)}
-                onEdit={() => { setEditTarget(member); setShowModal(true) }}
-                onDelete={() => handleDelete(member.id)}
-                onStartConnect={() => {
-                  setConnectingFrom(member.id)
-                  setSelected(member.id)
-                }}
-              />
+          {/* SVG */}
+          {members.length > 0 && (
+            <div style={{ transform: `translate(${effectivePan.x}px, ${effectivePan.y}px) scale(${effectiveZoom})`, transformOrigin: '0 0', willChange: 'transform' }}>
+              <svg width={canvasW} height={canvasH} viewBox={`0 0 ${canvasW} ${canvasH}`} style={{ display: 'block', overflow: 'visible' }}>
+                <Lines layout={layout} />
+                {[...layout.values()].map(node => (
+                  <MemberCard
+                    key={node.member.id}
+                    node={node}
+                    selected={selected === node.member.id}
+                    onClick={() => setSelected(s => s === node.member.id ? null : node.member.id)}
+                    onEdit={() => { setEditTarget(node.member); setDefaultParentId(node.member.parentId); setShowModal(true) }}
+                    onDelete={() => handleDelete(node.member.id)}
+                    onAddChild={() => openAddModal(node.member.id)}
+                  />
+                ))}
+              </svg>
             </div>
-          ))}
+          )}
+
+          <ZoomControls zoom={zoom} onZoom={handleZoom} onReset={handleResetZoom} disabled={!isLayoutEdit} />
         </div>
 
         {/* Legend */}
         {members.length > 0 && (
-          <div className="flex items-center gap-4 mt-4 text-xs text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <svg width="24" height="10"><path d="M0 5 C8 5, 16 5, 24 5" stroke="#cbd5e1" strokeWidth="2" fill="none" markerEnd="url(#arrowhead)" /></svg>
-              Hierarchy line
+          <div className="flex items-center gap-4 mt-3 text-xs text-slate-400 px-1">
+            <span className="flex items-center gap-2">
+              <svg width="28" height="14">
+                <line x1="4"  y1="7" x2="14" y2="7" stroke="#94a3b8" strokeWidth="1.5" />
+                <line x1="14" y1="7" x2="14" y2="2" stroke="#94a3b8" strokeWidth="1.5" />
+                <line x1="14" y1="2" x2="24" y2="2" stroke="#94a3b8" strokeWidth="1.5" />
+              </svg>
+              Reporting line
             </span>
             <span>·</span>
-            <span>{members.length} member{members.length !== 1 ? 's' : ''}</span>
+            <span>★ = Root member</span>
             <span>·</span>
-            <span>{members.filter(m => m.parentId).length} connection{members.filter(m => m.parentId).length !== 1 ? 's' : ''}</span>
+            <span>{isLayoutEdit ? 'Layout Edit ON: drag canvas and zoom enabled' : 'Layout Edit OFF: canvas drag/zoom locked'}</span>
+            <span>·</span>
+            <span>Click card → use <strong>Edit</strong> · <strong>Add Sub</strong> · <strong>Remove</strong> buttons below it</span>
           </div>
         )}
       </div>
 
-      {/* Add/Edit Modal */}
-      <MemberModal
-        open={showModal}
-        onClose={() => { setShowModal(false); setEditTarget(null) }}
-        onSave={handleSaveMember}
-        existing={editTarget}
-      />
+      <ClearAllDialog open={showClear} onConfirm={handleClearConfirmed} onCancel={() => setShowClear(false)} />
+      <MemberModal open={showModal} onClose={() => { setShowModal(false); setEditTarget(null) }}
+        onSave={handleSave} existing={editTarget} members={members} defaultParentId={defaultParentId} />
     </>
   )
 }
