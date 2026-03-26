@@ -80,11 +80,102 @@ const STATUS_FILTERS: Array<{ label: string; value: Doc201Status | 'ALL' }> = [
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
+// ── Inline File Viewer Modal ──────────────────
+function ViewFileModal({ item, open, onClose }: {
+  item: (Doc201Item & { fileUrl?: string }) | null
+  open: boolean
+  onClose: () => void
+}) {
+  if (!item || !(item as any).fileUrl) return null
+  const fileUrl = (item as any).fileUrl as string
+  const isPDF   = !!fileUrl.match(/\.pdf(\?|$)/i)
+  const isImage = !!fileUrl.match(/\.(jpg|jpeg|png|webp|gif)(\?|$)/i)
+  const isDocx  = !!fileUrl.match(/\.docx?(\?|$)/i)
+  const isXlsx  = !!fileUrl.match(/\.xlsx?(\?|$)/i)
+
+  const fileIcon = isPDF ? '📕' : isDocx ? '📘' : isXlsx ? '📗' : isImage ? '🖼️' : '📄'
+
+  return (
+    <Modal open={open} onClose={onClose} title={`View: ${item.label}`} width="max-w-4xl">
+      <div className="flex flex-col" style={{ maxHeight: '80vh' }}>
+        {/* Toolbar */}
+        <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-lg flex-shrink-0">{fileIcon}</span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-700 truncate">{item.label}</p>
+              {item.sublabel && <p className="text-[10px] text-slate-400 truncate">{item.sublabel}</p>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
+            <a
+              href={fileUrl}
+              download
+              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:border-blue-300 transition flex items-center gap-1"
+            >
+              ⬇ Download
+            </a>
+          </div>
+        </div>
+
+        {/* Preview area */}
+        <div className="flex-1 overflow-auto bg-slate-100 min-h-0">
+          {isPDF ? (
+            <iframe
+              src={fileUrl}
+              title={item.label}
+              className="w-full border-0"
+              style={{ height: '65vh', minHeight: 400 }}
+            />
+          ) : isImage ? (
+            <div className="flex items-center justify-center p-6 min-h-[400px]">
+              <img
+                src={fileUrl}
+                alt={item.label}
+                className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 px-8 text-center min-h-[300px]">
+              <span className="text-5xl mb-4">{fileIcon}</span>
+              <p className="text-sm font-semibold text-slate-700 mb-1">{item.label}</p>
+              <p className="text-xs text-slate-400 mb-2">
+                {item.fileSize ?? ''} {isDocx ? '· Word Document' : isXlsx ? '· Excel Spreadsheet' : ''}
+              </p>
+              <p className="text-xs text-slate-400 mb-5 max-w-xs">
+                This file type cannot be previewed inline. Download it to view the contents.
+              </p>
+              <a
+                href={fileUrl}
+                download
+                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+              >
+                ⬇ Download to view
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-white flex-shrink-0">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            {item.dateUpdated && <span>Filed: {formatDate(item.dateUpdated)}</span>}
+            {item.filedBy && <span>· By: {item.filedBy}</span>}
+            {item.fileSize && <span>· {item.fileSize}</span>}
+          </div>
+          <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ── Checklist Row ─────────────────────────────
-function ChecklistRow({ item, index, onUpload }: {
+function ChecklistRow({ item, index, onUpload, onView }: {
   item: Doc201Item & { fileUrl?: string }
   index: number
   onUpload: (item: Doc201Item) => void
+  onView: (item: Doc201Item & { fileUrl?: string }) => void
 }) {
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50/80 transition group">
@@ -116,10 +207,12 @@ function ChecklistRow({ item, index, onUpload }: {
             📎 Upload
           </button>
           {(item as any).fileUrl && (
-            <a href={(item as any).fileUrl} target="_blank" rel="noopener noreferrer"
-              className="text-[10px] font-semibold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
+            <button
+              onClick={() => onView(item)}
+              className="text-[10px] font-semibold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition"
+            >
               👁 View
-            </a>
+            </button>
           )}
         </div>
       </td>
@@ -448,6 +541,7 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
   const [catFilter,    setCatFilter]    = useState('ALL')
   const [docQuery,     setDocQuery]     = useState('')
   const uploadDisc       = useDisclosure<Doc201Item>()
+  const viewDisc         = useDisclosure<Doc201Item & { fileUrl?: string }>()
   const editProfileModal = useModal()
 
   const docs = useMemo(() => {
@@ -596,6 +690,7 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
                     item={item}
                     index={idx}
                     onUpload={d => uploadDisc.open(d)}
+                    onView={d => viewDisc.open(d)}
                   />
                 ))}
               </tbody>
@@ -627,6 +722,12 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
           onUpdate(person.id, docId, 'COMPLETE', fileUrl, fileSize)
           uploadDisc.close()
         }}
+      />
+
+      <ViewFileModal
+        item={viewDisc.payload ?? null}
+        open={viewDisc.isOpen}
+        onClose={viewDisc.close}
       />
 
       <EditProfileModal
@@ -770,7 +871,6 @@ export default function PersonnelFilesPage() {
 
         const withDocs = await Promise.all(
           data.map(async (p: any) => {
-            // Try to load documents from DB
             const { data: docs, error: docsError } = await supabase
               .from('personnel_201_docs')
               .select('*')
@@ -779,13 +879,10 @@ export default function PersonnelFilesPage() {
 
             const personnelId = p.id
 
-            // If no docs found in DB, generate blank checklist as fallback
-            // and insert them so future loads work
             let documentList: Doc201Item[]
             if (docsError || !docs || docs.length === 0) {
               documentList = makeBlankChecklist(personnelId)
 
-              // Insert blank docs into DB for this existing record
               const docsToInsert = documentList.map(d => ({
                 id:           d.id,
                 personnel_id: personnelId,
