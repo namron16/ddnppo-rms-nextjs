@@ -140,6 +140,8 @@ export interface Personnel201 {
   lastUpdated: string
   initials: string
   avatarColor: string
+  /** Profile photo URL */
+  photoUrl?: string
   /** Extra profile fields shown in resume header */
   address?: string
   contactNo?: string

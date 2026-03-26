@@ -12,15 +12,52 @@ import { Modal }        from '@/components/ui/Modal'
 import { useToast }     from '@/components/ui/Toast'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import {
-  PERSONNEL_201,
   createPersonnel201,
   updateDoc201Status,
   uploadDoc201File,
-  deletePersonnel201,
   CATEGORY_LABELS,
 } from '@/lib/data201'
+import { supabase } from '@/lib/supabase'
 import { status201BadgeClass, status201Icon, formatDate } from '@/lib/utils'
-import type { Personnel201, Doc201Item, Doc201Status } from '@/types'
+import type { Personnel201, Doc201Item, Doc201Status, Doc201Category } from '@/types'
+
+// ── Blank checklist (fallback for records with no docs in DB) ──
+function makeBlankChecklist(personnelId: string): Doc201Item[] {
+  const template: Array<{ category: Doc201Category; label: string; sublabel?: string }> = [
+    { category: 'PERSONAL_DATA',  label: 'Updated PDS (DPRM Form)',                         sublabel: 'With latest 2x2 ID in Type A GOA Uniform' },
+    { category: 'CIVIL_DOCUMENTS',label: 'Birth Certificate',                                sublabel: 'PSA copy' },
+    { category: 'CIVIL_DOCUMENTS',label: 'Marriage Contract',                                sublabel: 'PSA copy (if applicable)' },
+    { category: 'CIVIL_DOCUMENTS',label: 'Birth Certificates of all Children',               sublabel: 'PSA copy' },
+    { category: 'ACADEMIC',       label: 'College Diploma' },
+    { category: 'ACADEMIC',       label: 'Transcript of Records and CAV',                    sublabel: 'School Records or CAV' },
+    { category: 'TRAINING',       label: 'Mandatory Training Documents',                     sublabel: 'Diploma, Final Order of Merits, Declaration of Graduates' },
+    { category: 'TRAINING',       label: 'Specialized Training / Seminars Attended',         sublabel: 'Certificate of Graduation/Attendance' },
+    { category: 'ELIGIBILITY',    label: 'Eligibilities',                                    sublabel: 'Highest/Appropriate — attested copies' },
+    { category: 'SPECIAL_ORDERS', label: 'Attested Appointment / Special Orders',            sublabel: 'Temp/Perm — attested and approved' },
+    { category: 'ASSIGNMENTS',    label: 'Order of Assignment, Designation / Detail' },
+    { category: 'ASSIGNMENTS',    label: 'Service Records',                                  sublabel: 'Indicate Longevity and RCA Orders' },
+    { category: 'PROMOTIONS',     label: 'Promotion / Demotion Orders',                      sublabel: 'Include Absorption Order and Appointments' },
+    { category: 'AWARDS',         label: 'Awards, Decorations and Commendations' },
+    { category: 'FIREARMS',       label: 'Firearms Records',                                 sublabel: 'Property Accountability Receipt (P.A.R)' },
+    { category: 'MEDICAL',        label: 'Latest Medical Records' },
+    { category: 'CASES',          label: 'Cases / Offenses',                                 sublabel: 'All administrative and criminal cases' },
+    { category: 'LEAVE',          label: 'Leave Records' },
+    { category: 'PAY_RECORDS',    label: 'RCA / Longevity Pay Orders',                       sublabel: 'All pay orders' },
+    { category: 'PAY_RECORDS',    label: 'Latest Per FM Previous Unit' },
+    { category: 'FINANCIAL',      label: 'Statement of Assets, Liabilities & Net Worth',     sublabel: 'SALN — latest copy' },
+    { category: 'TAXATION',       label: 'Individual Income Tax Return (ITR)',                sublabel: 'Latest filed ITR' },
+    { category: 'TAXATION',       label: 'Photocopy of Tax Identification Card (TIN)' },
+    { category: 'IDENTIFICATION', label: '1 PC Latest 2x2 ID Picture',                       sublabel: 'GOA Type A Uniform' },
+  ]
+  return template.map((t, i) => ({
+    id:          `${personnelId}-doc-${i + 1}`,
+    category:    t.category,
+    label:       t.label,
+    sublabel:    t.sublabel,
+    status:      'MISSING' as Doc201Status,
+    dateUpdated: '',
+  }))
+}
 
 // ── Helpers ───────────────────────────────────
 function completionPercent(docs: Doc201Item[]) {
@@ -44,11 +81,10 @@ const STATUS_FILTERS: Array<{ label: string; value: Doc201Status | 'ALL' }> = [
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 // ── Checklist Row ─────────────────────────────
-function ChecklistRow({ item, index, onUpload, onMarkComplete }: {
+function ChecklistRow({ item, index, onUpload }: {
   item: Doc201Item & { fileUrl?: string }
   index: number
   onUpload: (item: Doc201Item) => void
-  onMarkComplete: (item: Doc201Item) => void
 }) {
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50/80 transition group">
@@ -75,12 +111,6 @@ function ChecklistRow({ item, index, onUpload, onMarkComplete }: {
       <td className="px-3 py-2.5 text-xs text-slate-400">{item.fileSize ?? '—'}</td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-          {item.status !== 'COMPLETE' && (
-            <button onClick={() => onMarkComplete(item)}
-              className="text-[10px] font-semibold px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition whitespace-nowrap">
-              ✅ Complete
-            </button>
-          )}
           <button onClick={() => onUpload(item)}
             className="text-[10px] font-semibold px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
             📎 Upload
@@ -109,7 +139,12 @@ function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () 
     <button onClick={onClick}
       className="w-full text-left bg-white border-[1.5px] border-slate-200 rounded-xl p-5 hover:border-blue-400 hover:shadow-md transition-all duration-200">
       <div className="flex items-start gap-3 mb-4">
-        <Avatar initials={person.initials} color={person.avatarColor} size="lg" />
+        {person.photoUrl ? (
+          <img src={person.photoUrl} alt={person.name}
+            className="w-11 h-11 rounded-full object-cover flex-shrink-0 border-2 border-white shadow" />
+        ) : (
+          <Avatar initials={person.initials} color={person.avatarColor} size="lg" />
+        )}
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-800 text-[15px] leading-tight truncate">
             {person.rank} {person.name}
@@ -147,7 +182,7 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
 }) {
   const { toast }    = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [file, setFile]         = useState<File | null>(null)
+  const [file, setFile]           = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
 
   async function submit() {
@@ -221,17 +256,199 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
   )
 }
 
+// ── Edit Profile Modal ────────────────────────
+function EditProfileModal({ person, open, onClose, onSave }: {
+  person: Personnel201 | null
+  open: boolean
+  onClose: () => void
+  onSave: (updates: Partial<Personnel201> & { photoUrl?: string }) => void
+}) {
+  const { toast }    = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [saving, setSaving]   = useState(false)
+  const [preview, setPreview] = useState<string>('')
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [form, setForm] = useState({
+    name: '', rank: '', unit: '', status: '', contactNo: '', address: '',
+  })
+
+  useEffect(() => {
+    if (person && open) {
+      setForm({
+        name:      person.name      ?? '',
+        rank:      person.rank      ?? '',
+        unit:      person.unit      ?? '',
+        status:    person.status    ?? '',
+        contactNo: person.contactNo ?? '',
+        address:   person.address   ?? '',
+      })
+      setPreview(person.photoUrl ?? '')
+      setPhotoFile(null)
+    }
+  }, [person, open])
+
+  function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoFile(file)
+    const reader = new FileReader()
+    reader.onload = ev => setPreview(ev.target?.result as string)
+    reader.readAsDataURL(file)
+  }
+
+  async function submit() {
+    if (!form.name.trim()) { toast.error('Name is required.'); return }
+    setSaving(true)
+    try {
+      let photoUrl = person?.photoUrl ?? undefined
+
+      if (photoFile) {
+        const fileName = `avatars/${person?.id}-${Date.now()}-${photoFile.name.replace(/\s+/g, '_')}`
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('documents')
+          .upload(fileName, photoFile, { cacheControl: '3600', upsert: true })
+
+        if (storageError) {
+          toast.error('Photo upload failed.')
+          setSaving(false)
+          return
+        }
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
+        photoUrl = urlData.publicUrl
+      }
+
+      onSave({
+        name:      form.name.trim(),
+        rank:      form.rank.trim(),
+        unit:      form.unit.trim(),
+        status:    form.status.trim(),
+        contactNo: form.contactNo.trim(),
+        address:   form.address.trim(),
+        photoUrl,
+      })
+      toast.success('Profile updated.')
+      onClose()
+    } catch {
+      toast.error('Something went wrong.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
+
+  return (
+    <Modal open={open} onClose={saving ? () => {} : onClose} title="Edit Profile" width="max-w-md">
+      <div className="p-6 space-y-4">
+        <div className="flex flex-col items-center gap-2">
+          <div
+            onClick={() => !saving && fileInputRef.current?.click()}
+            className="w-24 h-24 rounded-full border-4 border-dashed border-slate-300 hover:border-blue-400 cursor-pointer flex items-center justify-center overflow-hidden transition relative group"
+          >
+            {preview ? (
+              <img src={preview} alt="preview" className="w-full h-full object-cover rounded-full" />
+            ) : (
+              <span className="text-3xl font-bold text-slate-400">
+                {form.name ? form.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '📷'}
+              </span>
+            )}
+            <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+              <span className="text-white text-xs font-semibold">Change</span>
+            </div>
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+          <button onClick={() => !saving && fileInputRef.current?.click()}
+            className="text-xs text-blue-600 hover:underline font-medium">
+            {preview ? 'Change Photo' : 'Upload Photo'}
+          </button>
+          {preview && (
+            <button onClick={() => { setPreview(''); setPhotoFile(null) }}
+              className="text-xs text-red-500 hover:underline">Remove Photo</button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Rank</label>
+            <select className={cls} value={form.rank}
+              onChange={e => setForm(f => ({ ...f, rank: e.target.value }))} disabled={saving}>
+              <option value="">None</option>
+              {['P/Col.','P/Lt. Col.','P/Maj.','P/Capt.','P/Lt.','P/Insp.','PSMS','PMMS','PEMS','PNCOP'].map(r => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+              Full Name <span className="text-red-500">*</span>
+            </label>
+            <input className={cls} placeholder="e.g. Ana Santos"
+              value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} disabled={saving} />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Unit / Assignment</label>
+          <input className={cls} placeholder="e.g. DDNPPO HQ"
+            value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} disabled={saving} />
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
+          <select className={cls} value={form.status}
+            onChange={e => setForm(f => ({ ...f, status: e.target.value }))} disabled={saving}>
+            <option value="">Select status…</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+            <option value="On Leave">On Leave</option>
+            <option value="Retired">Retired</option>
+            <option value="Transferred">Transferred</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Contact No.</label>
+          <input className={cls} placeholder="e.g. 09171234567"
+            value={form.contactNo} onChange={e => setForm(f => ({ ...f, contactNo: e.target.value }))} disabled={saving} />
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Address</label>
+          <textarea rows={2} className={`${cls} resize-none`} placeholder="e.g. Tagum City, Davao del Norte"
+            value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} disabled={saving} />
+        </div>
+
+        {saving && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <p className="text-sm text-blue-700 font-medium">Saving…</p>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2.5 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={saving}>
+            {saving ? 'Saving…' : '💾 Save Changes'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ── 201 Checklist Modal ───────────────────────
-function Checklist201Modal({ person, onClose, onUpdate }: {
+function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
   person: Personnel201 | null
   onClose: () => void
   onUpdate: (personId: string, docId: string, status: Doc201Status, fileUrl?: string, fileSize?: string) => void
+  onProfileSave: (personId: string, updates: Partial<Personnel201> & { photoUrl?: string }) => void
 }) {
-  const { toast }   = useToast()
+  const { toast }        = useToast()
   const [statusFilter, setStatusFilter] = useState<Doc201Status | 'ALL'>('ALL')
   const [catFilter,    setCatFilter]    = useState('ALL')
   const [docQuery,     setDocQuery]     = useState('')
-  const uploadDisc = useDisclosure<Doc201Item>()
+  const uploadDisc       = useDisclosure<Doc201Item>()
+  const editProfileModal = useModal()
 
   const docs = useMemo(() => {
     if (!person) return []
@@ -251,13 +468,6 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
   const forUpdate = person.documents.filter(d => d.status === 'FOR_UPDATE').length
   const expired   = person.documents.filter(d => d.status === 'EXPIRED').length
 
-  async function handleMarkComplete(item: Doc201Item) {
-    if (!person) return
-    await updateDoc201Status(item.id, 'COMPLETE', 'Admin')
-    onUpdate(person.id, item.id, 'COMPLETE')
-    toast.success(`"${item.label}" marked as complete.`)
-  }
-
   return (
     <>
       <Modal open={!!person} onClose={onClose} title="Police Personal File" width="max-w-5xl">
@@ -266,11 +476,17 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
         <div className="border-b border-slate-200">
           <div className="bg-[#0f1c35] px-6 py-5 flex items-stretch gap-5">
             <div className="flex-shrink-0">
-              <div className="w-40 h-40 rounded-xl border-2 border-white/20 flex flex-col items-center justify-center text-center"
+              <div className="w-40 h-40 rounded-xl border-2 border-white/20 flex flex-col items-center justify-center text-center overflow-hidden relative"
                 style={{ background: person.avatarColor + '33' }}>
-                <div className="w-20 h-20 rounded-full flex items-center justify-center text-3xl font-bold text-white mb-2"
-                  style={{ background: person.avatarColor }}>{person.initials}</div>
-                <span className="text-[9px] text-white/40 uppercase tracking-wide">2x2 Photo</span>
+                {person.photoUrl ? (
+                  <img src={person.photoUrl} alt={person.name} className="w-full h-full object-cover" />
+                ) : (
+                  <>
+                    <div className="w-20 h-20 rounded-full flex items-center justify-center text-3xl font-bold text-white mb-2"
+                      style={{ background: person.avatarColor }}>{person.initials}</div>
+                    <span className="text-[9px] text-white/40 uppercase tracking-wide">2x2 Photo</span>
+                  </>
+                )}
               </div>
             </div>
             <div className="w-px bg-white/10 self-stretch" />
@@ -291,17 +507,26 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
             <div className="w-px bg-white/10 self-stretch" />
             <div className="flex-1 flex flex-col gap-2 justify-center min-w-0">
               {[
-                { label: 'Serial No.',    value: person.serialNo },
-                { label: 'Firearm No.',   value: person.firearmSerialNo ?? '—' },
-                { label: 'Pag-IBIG',      value: person.pagIbigNo ?? '—' },
-                { label: 'PhilHealth',    value: person.philHealthNo ?? '—' },
-                { label: 'TIN',           value: person.tin ?? '—' },
+                { label: 'Serial No.',  value: person.serialNo },
+                { label: 'Firearm No.', value: person.firearmSerialNo ?? '—' },
+                { label: 'Pag-IBIG',    value: person.pagIbigNo ?? '—' },
+                { label: 'PhilHealth',  value: person.philHealthNo ?? '—' },
+                { label: 'TIN',         value: person.tin ?? '—' },
               ].map(r => (
                 <div key={r.label} className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[9.5px] text-white/45 font-semibold uppercase tracking-wide whitespace-nowrap w-24 flex-shrink-0">{r.label}:</span>
                   <span className="text-[12px] text-white font-medium truncate">{r.value}</span>
                 </div>
               ))}
+            </div>
+            {/* Edit button */}
+            <div className="flex flex-col justify-start pt-1 flex-shrink-0">
+              <button
+                onClick={editProfileModal.open}
+                className="text-[11px] font-semibold px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white/80 hover:text-white border border-white/20 rounded-lg transition flex items-center gap-1.5"
+              >
+                ✏️ Edit
+              </button>
             </div>
           </div>
 
@@ -358,7 +583,7 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[28%]">Document</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[18%]">Category</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[13%]">Status</th>
-                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[12%]">Date Updated</th>
+                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widests text-slate-400 text-left w-[12%]">Date Updated</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[9%]">Filed By</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[7%]">Size</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left">Actions</th>
@@ -371,7 +596,6 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
                     item={item}
                     index={idx}
                     onUpload={d => uploadDisc.open(d)}
-                    onMarkComplete={handleMarkComplete}
                   />
                 ))}
               </tbody>
@@ -394,7 +618,6 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
         </div>
       </Modal>
 
-      {/* Upload modal */}
       <UploadDocModal
         item={uploadDisc.payload ?? null}
         personName={`${person.rank} ${person.name}`}
@@ -404,6 +627,13 @@ function Checklist201Modal({ person, onClose, onUpdate }: {
           onUpdate(person.id, docId, 'COMPLETE', fileUrl, fileSize)
           uploadDisc.close()
         }}
+      />
+
+      <EditProfileModal
+        person={person}
+        open={editProfileModal.isOpen}
+        onClose={editProfileModal.close}
+        onSave={(updates) => onProfileSave(person.id, updates)}
       />
     </>
   )
@@ -432,12 +662,8 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
     const color    = colors[Math.floor(Math.random() * colors.length)]
 
     const result = await createPersonnel201({
-      name:        fullName,
-      rank:        form.rank,
-      serialNo:    form.serialNo,
-      unit:        form.unit,
-      initials,
-      avatarColor: color,
+      name: fullName, rank: form.rank, serialNo: form.serialNo,
+      unit: form.unit, initials, avatarColor: color,
     })
 
     if (result) {
@@ -498,14 +724,12 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
         <p className="text-xs text-slate-400 leading-relaxed">
           A blank 201 checklist (24 items, A–X) based on the PNP DPRM standard form will be created.
         </p>
-
         {loading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
             <p className="text-sm text-blue-700 font-medium">Creating 201 file…</p>
           </div>
         )}
-
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button variant="primary" onClick={submit} disabled={loading}>
@@ -531,42 +755,129 @@ export default function PersonnelFilesPage() {
   )
 
   useEffect(() => {
-    // Load from the seeded PERSONNEL_201 array (replace with API call if needed)
-    setPersonnel(PERSONNEL_201)
-    setLoading(false)
+    async function loadPersonnel() {
+      try {
+        const { data, error } = await supabase
+          .from('personnel_201')
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (error || !data || data.length === 0) {
+          setPersonnel([])
+          setLoading(false)
+          return
+        }
+
+        const withDocs = await Promise.all(
+          data.map(async (p: any) => {
+            // Try to load documents from DB
+            const { data: docs, error: docsError } = await supabase
+              .from('personnel_201_docs')
+              .select('*')
+              .eq('personnel_id', p.id)
+              .order('created_at', { ascending: true })
+
+            const personnelId = p.id
+
+            // If no docs found in DB, generate blank checklist as fallback
+            // and insert them so future loads work
+            let documentList: Doc201Item[]
+            if (docsError || !docs || docs.length === 0) {
+              documentList = makeBlankChecklist(personnelId)
+
+              // Insert blank docs into DB for this existing record
+              const docsToInsert = documentList.map(d => ({
+                id:           d.id,
+                personnel_id: personnelId,
+                category:     d.category,
+                label:        d.label,
+                sublabel:     d.sublabel ?? null,
+                status:       d.status,
+                date_updated: null,
+                filed_by:     null,
+                file_size:    null,
+                file_url:     null,
+                remarks:      null,
+              }))
+              await supabase.from('personnel_201_docs').insert(docsToInsert)
+            } else {
+              documentList = docs.map((d: any) => ({
+                id:          d.id,
+                category:    d.category,
+                label:       d.label,
+                sublabel:    d.sublabel ?? undefined,
+                status:      d.status,
+                dateUpdated: d.date_updated ?? '',
+                filedBy:     d.filed_by ?? undefined,
+                fileSize:    d.file_size ?? undefined,
+                fileUrl:     d.file_url ?? undefined,
+                remarks:     d.remarks ?? undefined,
+              }))
+            }
+
+            return {
+              id:           p.id,
+              name:         p.name,
+              rank:         p.rank,
+              serialNo:     p.serial_no    ?? '',
+              unit:         p.unit         ?? '',
+              dateCreated:  p.date_created ?? '',
+              lastUpdated:  p.last_updated ?? '',
+              initials:     p.initials     ?? '',
+              avatarColor:  p.avatar_color ?? '#3b63b8',
+              photoUrl:     p.photo_url    ?? undefined,
+              address:      p.address      ?? undefined,
+              contactNo:    p.contact_no   ?? undefined,
+              dateOfRetirement: p.date_of_retirement ?? undefined,
+              status:       p.status       ?? 'Active',
+              firearmSerialNo: p.firearm_serial_no ?? undefined,
+              pagIbigNo:    p.pag_ibig_no  ?? undefined,
+              philHealthNo: p.phil_health_no ?? undefined,
+              tin:          p.tin          ?? undefined,
+              payslipAccountNo: p.payslip_account_no ?? undefined,
+              documents:    documentList,
+            } as Personnel201
+          })
+        )
+
+        setPersonnel(withDocs)
+      } catch (err) {
+        console.error('Failed to load personnel:', err)
+        setPersonnel([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadPersonnel()
   }, [])
 
   function handleAdd(p: Personnel201) {
-    setPersonnel(prev => [...prev, p])
+    setPersonnel(prev => [p, ...prev])
   }
 
-  // Update a doc item status/fileUrl in local state
   function handleDocUpdate(personId: string, docId: string, status: Doc201Status, fileUrl?: string, fileSize?: string) {
+    const today = new Date().toISOString().split('T')[0]
+
     setPersonnel(prev => prev.map(p => {
       if (p.id !== personId) return p
       return {
         ...p,
         documents: p.documents.map(d => {
           if (d.id !== docId) return d
-          const today = new Date().toISOString().split('T')[0]
-          return {
-            ...d,
-            status,
-            dateUpdated: today,
-            filedBy:     'Admin',
+          return { ...d, status, dateUpdated: today, filedBy: 'Admin',
             ...(fileUrl  ? { fileUrl }  : {}),
             ...(fileSize ? { fileSize } : {}),
           }
         }),
       }
     }))
-    // Also update the viewed person if modal is open
+
     if (viewDisc.payload?.id === personId) {
       viewDisc.open({
         ...viewDisc.payload,
         documents: viewDisc.payload.documents.map(d => {
           if (d.id !== docId) return d
-          const today = new Date().toISOString().split('T')[0]
           return { ...d, status, dateUpdated: today, filedBy: 'Admin',
             ...(fileUrl ? { fileUrl } : {}), ...(fileSize ? { fileSize } : {}) }
         }),
@@ -574,12 +885,32 @@ export default function PersonnelFilesPage() {
     }
   }
 
-  const allDocs    = personnel.flatMap(p => p.documents)
-  const statCards  = [
-    { icon: '👥', value: personnel.length,                                                             label: 'Personnel Records',  bg: 'bg-blue-50',    num: 'text-blue-700'    },
-    { icon: '✅', value: allDocs.filter(d => d.status === 'COMPLETE').length,                          label: 'Documents Complete', bg: 'bg-emerald-50', num: 'text-emerald-700' },
-    { icon: '❌', value: allDocs.filter(d => d.status === 'MISSING').length,                           label: 'Documents Missing',  bg: 'bg-red-50',     num: 'text-red-700'     },
-    { icon: '🔄', value: allDocs.filter(d => d.status === 'FOR_UPDATE' || d.status === 'EXPIRED').length, label: 'Need Attention', bg: 'bg-amber-50',   num: 'text-amber-700'   },
+  function handleProfileSave(personId: string, updates: Partial<Personnel201> & { photoUrl?: string }) {
+    setPersonnel(prev => prev.map(p => p.id !== personId ? p : { ...p, ...updates }))
+
+    if (viewDisc.payload?.id === personId) {
+      viewDisc.open({ ...viewDisc.payload, ...updates })
+    }
+
+    supabase.from('personnel_201').update({
+      name:       updates.name,
+      rank:       updates.rank,
+      unit:       updates.unit,
+      status:     updates.status,
+      contact_no: updates.contactNo,
+      address:    updates.address,
+      photo_url:  updates.photoUrl ?? null,
+    }).eq('id', personId).then(({ error }) => {
+      if (error) console.warn('Profile update warning:', error.message)
+    })
+  }
+
+  const allDocs   = personnel.flatMap(p => p.documents)
+  const statCards = [
+    { icon: '👥', value: personnel.length,                                                                label: 'Personnel Records',  bg: 'bg-blue-50',    num: 'text-blue-700'    },
+    { icon: '✅', value: allDocs.filter(d => d.status === 'COMPLETE').length,                             label: 'Documents Complete', bg: 'bg-emerald-50', num: 'text-emerald-700' },
+    { icon: '❌', value: allDocs.filter(d => d.status === 'MISSING').length,                              label: 'Documents Missing',  bg: 'bg-red-50',     num: 'text-red-700'     },
+    { icon: '🔄', value: allDocs.filter(d => d.status === 'FOR_UPDATE' || d.status === 'EXPIRED').length, label: 'Need Attention',     bg: 'bg-amber-50',   num: 'text-amber-700'   },
   ]
 
   return (
@@ -587,8 +918,6 @@ export default function PersonnelFilesPage() {
       <PageHeader title="201 Files" />
 
       <div className="p-8 space-y-6">
-
-        {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statCards.map(s => (
             <div key={s.label} className={`${s.bg} border border-slate-200 rounded-xl px-5 py-4 flex items-center gap-3`}>
@@ -601,7 +930,6 @@ export default function PersonnelFilesPage() {
           ))}
         </div>
 
-        {/* Roster */}
         <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
             <div>
@@ -643,6 +971,7 @@ export default function PersonnelFilesPage() {
         person={viewDisc.payload ?? null}
         onClose={viewDisc.close}
         onUpdate={handleDocUpdate}
+        onProfileSave={handleProfileSave}
       />
       <AddPersonnelModal open={addModal.isOpen} onClose={addModal.close} onAdd={handleAdd} />
     </>
