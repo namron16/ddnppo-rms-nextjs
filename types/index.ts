@@ -153,4 +153,6 @@ export interface Personnel201 {
   tin?: string
   payslipAccountNo?: string
   documents: Doc201Item[]
+
+  archiveAfterYears?: number
 }

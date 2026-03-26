@@ -199,6 +199,7 @@ function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () 
   const missing   = person.documents.filter(d => d.status === 'MISSING').length
   const forUpdate = person.documents.filter(d => d.status === 'FOR_UPDATE').length
   const expired   = person.documents.filter(d => d.status === 'EXPIRED').length
+  const isRetired = person.status === 'Retired'
 
   return (
     <button onClick={onClick}
@@ -212,9 +213,24 @@ function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () 
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-800 text-[15px] leading-tight truncate">{person.rank} {person.name}</div>
           <div className="text-xs text-slate-400 mt-0.5">{person.serialNo} · {person.unit}</div>
+          {/* Status + archive badge row */}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+              isRetired
+                ? 'bg-slate-200 text-slate-600'
+                : 'bg-emerald-100 text-emerald-700'
+            }`}>
+              {isRetired ? '🏅 Retired' : '🟢 Active'}
+            </span>
+            {isRetired && (person as any).archiveAfterYears != null && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                🗄 Archive in {(person as any).archiveAfterYears}y
+              </span>
+            )}
+          </div>
           <div className="text-xs text-slate-400 mt-0.5">Updated: {formatDate(person.lastUpdated)}</div>
         </div>
-        <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+        <span className={`text-xs font-bold px-2 py-1 rounded-full flex-shrink-0 ${
           pct === 100 ? 'bg-emerald-100 text-emerald-700'
           : pct >= 60 ? 'bg-amber-100 text-amber-700'
           : 'bg-red-100 text-red-700'
@@ -318,17 +334,20 @@ function EditProfileModal({ person, open, onClose, onSave }: {
   person: Personnel201 | null
   open: boolean
   onClose: () => void
-  onSave: (updates: Partial<Personnel201> & { photoUrl?: string }) => void
+  onSave: (updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) => void
 }) {
   const { toast }    = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [saving, setSaving]   = useState(false)
   const [preview, setPreview] = useState<string>('')
   const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [archiveAfterYears, setArchiveAfterYears] = useState<string>('')
   const [form, setForm] = useState({
     name: '', rank: '', unit: '', status: '', contactNo: '', address: '',
     tin: '', pagIbigNo: '', philHealthNo: '', firearmSerialNo: '',
   })
+
+  const isRetired = form.status === 'Retired'
 
   useEffect(() => {
     if (person && open) {
@@ -346,6 +365,7 @@ function EditProfileModal({ person, open, onClose, onSave }: {
       })
       setPreview(person.photoUrl ?? '')
       setPhotoFile(null)
+      setArchiveAfterYears((person as any).archiveAfterYears != null ? String((person as any).archiveAfterYears) : '')
     }
   }, [person, open])
 
@@ -360,6 +380,19 @@ function EditProfileModal({ person, open, onClose, onSave }: {
 
   async function submit() {
     if (!form.name.trim()) { toast.error('Name is required.'); return }
+
+    if (isRetired) {
+      if (!archiveAfterYears) {
+        toast.error('Please specify the file retention period before archiving.')
+        return
+      }
+      const years = Number(archiveAfterYears)
+      if (isNaN(years) || years <= 0) {
+        toast.error('Please enter a valid number of years (must be greater than 0).')
+        return
+      }
+    }
+
     setSaving(true)
     try {
       let photoUrl = person?.photoUrl ?? undefined
@@ -391,6 +424,7 @@ function EditProfileModal({ person, open, onClose, onSave }: {
         pagIbigNo:       form.pagIbigNo.trim()       || undefined,
         philHealthNo:    form.philHealthNo.trim()    || undefined,
         firearmSerialNo: form.firearmSerialNo.trim() || undefined,
+        archiveAfterYears: isRetired && archiveAfterYears ? Number(archiveAfterYears) : undefined,
       })
       toast.success('Profile updated.')
       onClose()
@@ -467,7 +501,12 @@ function EditProfileModal({ person, open, onClose, onSave }: {
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
           <select className={cls} value={form.status}
-            onChange={e => setForm(f => ({ ...f, status: e.target.value }))} disabled={saving}>
+            onChange={e => {
+              setForm(f => ({ ...f, status: e.target.value }))
+              // Clear archive years when switching away from Retired
+              if (e.target.value !== 'Retired') setArchiveAfterYears('')
+            }}
+            disabled={saving}>
             <option value="">Select status…</option>
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
@@ -476,6 +515,48 @@ function EditProfileModal({ person, open, onClose, onSave }: {
             <option value="Transferred">Transferred</option>
           </select>
         </div>
+
+        {/* ── Archive retention — only shown when Retired ── */}
+        {isRetired && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500 text-base flex-shrink-0 mt-0.5">🗄️</span>
+              <div>
+                <p className="text-[12px] font-semibold text-amber-800 leading-snug">File Retention Period</p>
+                <p className="text-[11px] text-amber-600 mt-0.5 leading-relaxed">
+                  Specify how many years this 201 file should be kept before it is automatically moved to the Archive.
+                </p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-widest text-amber-700 mb-1.5">
+                Archive file after <span className="text-red-500">*</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  disabled={saving}
+                  className="w-28 px-3 py-2.5 border-[1.5px] border-amber-300 rounded-lg text-sm bg-white focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition font-semibold text-slate-800 text-center disabled:opacity-50"
+                  placeholder="e.g. 5"
+                  value={archiveAfterYears}
+                  onChange={e => setArchiveAfterYears(e.target.value)}
+                />
+                <span className="text-sm text-amber-700 font-medium">
+                  {Number(archiveAfterYears) === 1 ? 'year' : 'years'} from retirement date
+                </span>
+              </div>
+              {archiveAfterYears && Number(archiveAfterYears) > 0 && (
+                <p className="text-[11px] text-amber-600 mt-2">
+                  📅 This file will be queued for archiving{' '}
+                  <strong>{archiveAfterYears} {Number(archiveAfterYears) === 1 ? 'year' : 'years'}</strong>{' '}
+                  after the retirement date.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Contact No */}
         <div>
@@ -541,7 +622,7 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
   person: Personnel201 | null
   onClose: () => void
   onUpdate: (personId: string, docId: string, status: Doc201Status, fileUrl?: string, fileSize?: string) => void
-  onProfileSave: (personId: string, updates: Partial<Personnel201> & { photoUrl?: string }) => void
+  onProfileSave: (personId: string, updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) => void
 }) {
   const { toast }        = useToast()
   const [statusFilter, setStatusFilter] = useState<Doc201Status | 'ALL'>('ALL')
@@ -568,6 +649,7 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
   const missing   = person.documents.filter(d => d.status === 'MISSING').length
   const forUpdate = person.documents.filter(d => d.status === 'FOR_UPDATE').length
   const expired   = person.documents.filter(d => d.status === 'EXPIRED').length
+  const isRetired = person.status === 'Retired'
 
   return (
     <>
@@ -595,24 +677,33 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
               {[
                 { label: 'Name',    value: `${person.rank} ${person.name}` },
                 { label: 'Unit',    value: person.unit },
-                { label: 'Status',  value: person.status ?? 'Active' },
+                { label: 'Status',  value: person.status ?? 'Active', isStatus: true },
                 { label: 'Contact', value: person.contactNo ?? '—' },
                 { label: 'Address', value: person.address ?? '—' },
               ].map(r => (
                 <div key={r.label} className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[9.5px] text-white/45 font-semibold uppercase tracking-wide whitespace-nowrap w-20 flex-shrink-0">{r.label}:</span>
-                  <span className="text-[12px] text-white font-medium truncate">{r.value}</span>
+                  <span className={`text-[12px] font-medium truncate ${
+                    (r as any).isStatus && isRetired ? 'text-amber-300' : 'text-white'
+                  }`}>
+                    {(r as any).isStatus && isRetired ? '🏅 ' : ''}{r.value}
+                    {(r as any).isStatus && isRetired && (person as any).archiveAfterYears != null && (
+                      <span className="ml-2 text-[10px] text-amber-400/80 font-normal">
+                        (Archive after {(person as any).archiveAfterYears} {(person as any).archiveAfterYears === 1 ? 'year' : 'years'})
+                      </span>
+                    )}
+                  </span>
                 </div>
               ))}
             </div>
             <div className="w-px bg-white/10 self-stretch" />
             <div className="flex-1 flex flex-col gap-2 justify-center min-w-0">
               {[
-                { label: 'Serial No.',      value: person.serialNo },
-                { label: 'Firearm No.',     value: person.firearmSerialNo ?? '—' },
-                { label: 'Pag-IBIG',        value: person.pagIbigNo ?? '—' },
-                { label: 'PhilHealth',      value: person.philHealthNo ?? '—' },
-                { label: 'TIN',             value: person.tin ?? '—' },
+                { label: 'Serial No.',  value: person.serialNo },
+                { label: 'Firearm No.', value: person.firearmSerialNo ?? '—' },
+                { label: 'Pag-IBIG',    value: person.pagIbigNo ?? '—' },
+                { label: 'PhilHealth',  value: person.philHealthNo ?? '—' },
+                { label: 'TIN',         value: person.tin ?? '—' },
               ].map(r => (
                 <div key={r.label} className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[9.5px] text-white/45 font-semibold uppercase tracking-wide whitespace-nowrap w-24 flex-shrink-0">{r.label}:</span>
@@ -755,14 +846,33 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
 }) {
   const { toast }  = useToast()
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ lastName: '', firstName: '', rank: '', serialNo: '', unit: '' })
+  const [archiveAfterYears, setArchiveAfterYears] = useState<string>('')
+  const [form, setForm] = useState({
+    lastName: '', firstName: '', rank: '', serialNo: '', unit: '',
+    status: 'Active',
+  })
   const f = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }))
+
+  const isRetired = form.status === 'Retired'
 
   async function submit() {
     if (!form.lastName || !form.firstName || !form.rank) {
       toast.error('Fill in all required fields.')
       return
     }
+
+    if (isRetired) {
+      if (!archiveAfterYears) {
+        toast.error('Please specify the file retention period before archiving.')
+        return
+      }
+      const years = Number(archiveAfterYears)
+      if (isNaN(years) || years <= 0) {
+        toast.error('Please enter a valid number of years (must be greater than 0).')
+        return
+      }
+    }
+
     setLoading(true)
     const fullName = `${form.firstName} ${form.lastName}`
     const initials = `${form.firstName[0]}${form.lastName[0]}`.toUpperCase()
@@ -772,12 +882,17 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
     const result = await createPersonnel201({
       name: fullName, rank: form.rank, serialNo: form.serialNo,
       unit: form.unit, initials, avatarColor: color,
+      ...(isRetired && archiveAfterYears ? { archiveAfterYears: Number(archiveAfterYears) } : {}),
     })
 
     if (result) {
-      toast.success(`201 file for ${form.rank} ${fullName} created.`)
+      const retentionMsg = isRetired && archiveAfterYears
+        ? ` File will be archived after ${archiveAfterYears} ${Number(archiveAfterYears) === 1 ? 'year' : 'years'}.`
+        : ''
+      toast.success(`201 file for ${form.rank} ${fullName} created.${retentionMsg}`)
       onAdd(result)
-      setForm({ lastName: '', firstName: '', rank: '', serialNo: '', unit: '' })
+      setForm({ lastName: '', firstName: '', rank: '', serialNo: '', unit: '', status: 'Active' })
+      setArchiveAfterYears('')
       onClose()
     } else {
       toast.error('Failed to create 201 file. Please try again.')
@@ -829,6 +944,70 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
           <input className={cls} placeholder="e.g. DDNPPO HQ, PCADU" value={form.unit}
             onChange={e => f('unit', e.target.value)} disabled={loading} />
         </div>
+
+        {/* Status */}
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
+          <select
+            className={cls}
+            value={form.status}
+            onChange={e => {
+              f('status', e.target.value)
+              if (e.target.value !== 'Retired') setArchiveAfterYears('')
+            }}
+            disabled={loading}
+          >
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+            <option value="On Leave">On Leave</option>
+            <option value="Retired">Retired</option>
+            <option value="Transferred">Transferred</option>
+          </select>
+        </div>
+
+        {/* ── Archive retention — only shown when Retired ── */}
+        {isRetired && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <span className="text-amber-500 text-base flex-shrink-0 mt-0.5">🗄️</span>
+              <div>
+                <p className="text-[12px] font-semibold text-amber-800 leading-snug">File Retention Period</p>
+                <p className="text-[11px] text-amber-600 mt-0.5 leading-relaxed">
+                  Since this personnel is marked as <strong>Retired</strong>, specify how many years
+                  this 201 file should be kept before it is automatically moved to the Archive.
+                </p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-widest text-amber-700 mb-1.5">
+                Archive file after <span className="text-red-500">*</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  disabled={loading}
+                  className="w-28 px-3 py-2.5 border-[1.5px] border-amber-300 rounded-lg text-sm bg-white focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition font-semibold text-slate-800 text-center disabled:opacity-50"
+                  placeholder="e.g. 5"
+                  value={archiveAfterYears}
+                  onChange={e => setArchiveAfterYears(e.target.value)}
+                />
+                <span className="text-sm text-amber-700 font-medium">
+                  {Number(archiveAfterYears) === 1 ? 'year' : 'years'} from retirement date
+                </span>
+              </div>
+              {archiveAfterYears && Number(archiveAfterYears) > 0 && (
+                <p className="text-[11px] text-amber-600 mt-2">
+                  📅 This file will be queued for archiving{' '}
+                  <strong>{archiveAfterYears} {Number(archiveAfterYears) === 1 ? 'year' : 'years'}</strong>{' '}
+                  after the retirement date.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         <p className="text-xs text-slate-400 leading-relaxed">
           A blank 201 checklist (24 items, A–X) based on the PNP DPRM standard form will be created.
         </p>
@@ -919,26 +1098,27 @@ export default function PersonnelFilesPage() {
             }
 
             return {
-              id:              p.id,
-              name:            p.name,
-              rank:            p.rank,
-              serialNo:        p.serial_no          ?? '',
-              unit:            p.unit               ?? '',
-              dateCreated:     p.date_created        ?? '',
-              lastUpdated:     p.last_updated        ?? '',
-              initials:        p.initials            ?? '',
-              avatarColor:     p.avatar_color        ?? '#3b63b8',
-              photoUrl:        p.photo_url           ?? undefined,
-              address:         p.address             ?? undefined,
-              contactNo:       p.contact_no          ?? undefined,
-              dateOfRetirement:p.date_of_retirement  ?? undefined,
-              status:          p.status              ?? 'Active',
-              firearmSerialNo: p.firearm_serial_no   ?? undefined,
-              pagIbigNo:       p.pag_ibig_no         ?? undefined,
-              philHealthNo:    p.phil_health_no      ?? undefined,
-              tin:             p.tin                 ?? undefined,
-              payslipAccountNo:p.payslip_account_no  ?? undefined,
-              documents:       documentList,
+              id:               p.id,
+              name:             p.name,
+              rank:             p.rank,
+              serialNo:         p.serial_no           ?? '',
+              unit:             p.unit                ?? '',
+              dateCreated:      p.date_created         ?? '',
+              lastUpdated:      p.last_updated         ?? '',
+              initials:         p.initials             ?? '',
+              avatarColor:      p.avatar_color         ?? '#3b63b8',
+              photoUrl:         p.photo_url            ?? undefined,
+              address:          p.address              ?? undefined,
+              contactNo:        p.contact_no           ?? undefined,
+              dateOfRetirement: p.date_of_retirement   ?? undefined,
+              status:           p.status               ?? 'Active',
+              firearmSerialNo:  p.firearm_serial_no    ?? undefined,
+              pagIbigNo:        p.pag_ibig_no          ?? undefined,
+              philHealthNo:     p.phil_health_no       ?? undefined,
+              tin:              p.tin                  ?? undefined,
+              payslipAccountNo: p.payslip_account_no   ?? undefined,
+              archiveAfterYears:p.archive_after_years  ?? undefined,
+              documents:        documentList,
             } as Personnel201
           })
         )
@@ -988,7 +1168,7 @@ export default function PersonnelFilesPage() {
     }
   }
 
-  function handleProfileSave(personId: string, updates: Partial<Personnel201> & { photoUrl?: string }) {
+  function handleProfileSave(personId: string, updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) {
     setPersonnel(prev => prev.map(p => p.id !== personId ? p : { ...p, ...updates }))
 
     if (viewDisc.payload?.id === personId) {
@@ -996,17 +1176,18 @@ export default function PersonnelFilesPage() {
     }
 
     supabase.from('personnel_201').update({
-      name:              updates.name,
-      rank:              updates.rank,
-      unit:              updates.unit,
-      status:            updates.status,
-      contact_no:        updates.contactNo,
-      address:           updates.address,
-      photo_url:         updates.photoUrl          ?? null,
-      tin:               updates.tin               ?? null,
-      pag_ibig_no:       updates.pagIbigNo         ?? null,
-      phil_health_no:    updates.philHealthNo      ?? null,
-      firearm_serial_no: updates.firearmSerialNo   ?? null,
+      name:                updates.name,
+      rank:                updates.rank,
+      unit:                updates.unit,
+      status:              updates.status,
+      contact_no:          updates.contactNo,
+      address:             updates.address,
+      photo_url:           updates.photoUrl            ?? null,
+      tin:                 updates.tin                 ?? null,
+      pag_ibig_no:         updates.pagIbigNo           ?? null,
+      phil_health_no:      updates.philHealthNo        ?? null,
+      firearm_serial_no:   updates.firearmSerialNo     ?? null,
+      archive_after_years: updates.archiveAfterYears   ?? null,
     }).eq('id', personId).then(({ error }) => {
       if (error) console.warn('Profile update warning:', error.message)
     })
