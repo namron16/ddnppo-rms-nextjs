@@ -98,7 +98,6 @@ function ViewFileModal({ item, open, onClose }: {
   return (
     <Modal open={open} onClose={onClose} title={`View: ${item.label}`} width="max-w-4xl">
       <div className="flex flex-col" style={{ maxHeight: '80vh' }}>
-        {/* Toolbar */}
         <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-lg flex-shrink-0">{fileIcon}</span>
@@ -108,55 +107,30 @@ function ViewFileModal({ item, open, onClose }: {
             </div>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-            <a
-              href={fileUrl}
-              download
-              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:border-blue-300 transition flex items-center gap-1"
-            >
+            <a href={fileUrl} download
+              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:border-blue-300 transition flex items-center gap-1">
               ⬇ Download
             </a>
           </div>
         </div>
-
-        {/* Preview area */}
         <div className="flex-1 overflow-auto bg-slate-100 min-h-0">
           {isPDF ? (
-            <iframe
-              src={fileUrl}
-              title={item.label}
-              className="w-full border-0"
-              style={{ height: '65vh', minHeight: 400 }}
-            />
+            <iframe src={fileUrl} title={item.label} className="w-full border-0" style={{ height: '65vh', minHeight: 400 }} />
           ) : isImage ? (
             <div className="flex items-center justify-center p-6 min-h-[400px]">
-              <img
-                src={fileUrl}
-                alt={item.label}
-                className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white"
-              />
+              <img src={fileUrl} alt={item.label} className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white" />
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 px-8 text-center min-h-[300px]">
               <span className="text-5xl mb-4">{fileIcon}</span>
               <p className="text-sm font-semibold text-slate-700 mb-1">{item.label}</p>
-              <p className="text-xs text-slate-400 mb-2">
-                {item.fileSize ?? ''} {isDocx ? '· Word Document' : isXlsx ? '· Excel Spreadsheet' : ''}
-              </p>
-              <p className="text-xs text-slate-400 mb-5 max-w-xs">
-                This file type cannot be previewed inline. Download it to view the contents.
-              </p>
-              <a
-                href={fileUrl}
-                download
-                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-              >
+              <p className="text-xs text-slate-400 mb-5 max-w-xs">This file type cannot be previewed inline. Download it to view the contents.</p>
+              <a href={fileUrl} download className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition">
                 ⬇ Download to view
               </a>
             </div>
           )}
         </div>
-
-        {/* Footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-white flex-shrink-0">
           <div className="flex items-center gap-3 text-xs text-slate-400">
             {item.dateUpdated && <span>Filed: {formatDate(item.dateUpdated)}</span>}
@@ -207,10 +181,8 @@ function ChecklistRow({ item, index, onUpload, onView }: {
             📎 Upload
           </button>
           {(item as any).fileUrl && (
-            <button
-              onClick={() => onView(item)}
-              className="text-[10px] font-semibold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition"
-            >
+            <button onClick={() => onView(item)}
+              className="text-[10px] font-semibold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
               👁 View
             </button>
           )}
@@ -233,15 +205,12 @@ function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () 
       className="w-full text-left bg-white border-[1.5px] border-slate-200 rounded-xl p-5 hover:border-blue-400 hover:shadow-md transition-all duration-200">
       <div className="flex items-start gap-3 mb-4">
         {person.photoUrl ? (
-          <img src={person.photoUrl} alt={person.name}
-            className="w-11 h-11 rounded-full object-cover flex-shrink-0 border-2 border-white shadow" />
+          <img src={person.photoUrl} alt={person.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0 border-2 border-white shadow" />
         ) : (
           <Avatar initials={person.initials} color={person.avatarColor} size="lg" />
         )}
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-slate-800 text-[15px] leading-tight truncate">
-            {person.rank} {person.name}
-          </div>
+          <div className="font-bold text-slate-800 text-[15px] leading-tight truncate">{person.rank} {person.name}</div>
           <div className="text-xs text-slate-400 mt-0.5">{person.serialNo} · {person.unit}</div>
           <div className="text-xs text-slate-400 mt-0.5">Updated: {formatDate(person.lastUpdated)}</div>
         </div>
@@ -302,12 +271,10 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
           <p className="text-sm font-semibold text-slate-800">{item?.label}</p>
           <p className="text-xs text-slate-400 mt-0.5">For: {personName}</p>
         </div>
-
         <input ref={fileInputRef} type="file"
           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
           className="hidden"
           onChange={e => setFile(e.target.files?.[0] ?? null)} />
-
         {file ? (
           <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
             <div className="flex items-center gap-3 min-w-0">
@@ -318,8 +285,7 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
               </div>
             </div>
             {!uploading && (
-              <button onClick={() => setFile(null)}
-                className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3">✕</button>
+              <button onClick={() => setFile(null)} className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3">✕</button>
             )}
           </div>
         ) : (
@@ -330,14 +296,12 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
             <p className="text-xs text-slate-400">PDF, DOCX, JPG — max 50 MB</p>
           </div>
         )}
-
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
             <p className="text-sm text-blue-700 font-medium">Uploading to cloud storage…</p>
           </div>
         )}
-
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose} disabled={uploading}>Cancel</Button>
           <Button variant="primary" onClick={submit} disabled={uploading}>
@@ -363,17 +327,22 @@ function EditProfileModal({ person, open, onClose, onSave }: {
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [form, setForm] = useState({
     name: '', rank: '', unit: '', status: '', contactNo: '', address: '',
+    tin: '', pagIbigNo: '', philHealthNo: '', firearmSerialNo: '',
   })
 
   useEffect(() => {
     if (person && open) {
       setForm({
-        name:      person.name      ?? '',
-        rank:      person.rank      ?? '',
-        unit:      person.unit      ?? '',
-        status:    person.status    ?? '',
-        contactNo: person.contactNo ?? '',
-        address:   person.address   ?? '',
+        name:            person.name            ?? '',
+        rank:            person.rank            ?? '',
+        unit:            person.unit            ?? '',
+        status:          person.status          ?? '',
+        contactNo:       person.contactNo       ?? '',
+        address:         person.address         ?? '',
+        tin:             person.tin             ?? '',
+        pagIbigNo:       person.pagIbigNo       ?? '',
+        philHealthNo:    person.philHealthNo    ?? '',
+        firearmSerialNo: person.firearmSerialNo ?? '',
       })
       setPreview(person.photoUrl ?? '')
       setPhotoFile(null)
@@ -411,13 +380,17 @@ function EditProfileModal({ person, open, onClose, onSave }: {
       }
 
       onSave({
-        name:      form.name.trim(),
-        rank:      form.rank.trim(),
-        unit:      form.unit.trim(),
-        status:    form.status.trim(),
-        contactNo: form.contactNo.trim(),
-        address:   form.address.trim(),
+        name:            form.name.trim(),
+        rank:            form.rank.trim(),
+        unit:            form.unit.trim(),
+        status:          form.status.trim(),
+        contactNo:       form.contactNo.trim(),
+        address:         form.address.trim(),
         photoUrl,
+        tin:             form.tin.trim()             || undefined,
+        pagIbigNo:       form.pagIbigNo.trim()       || undefined,
+        philHealthNo:    form.philHealthNo.trim()    || undefined,
+        firearmSerialNo: form.firearmSerialNo.trim() || undefined,
       })
       toast.success('Profile updated.')
       onClose()
@@ -433,6 +406,8 @@ function EditProfileModal({ person, open, onClose, onSave }: {
   return (
     <Modal open={open} onClose={saving ? () => {} : onClose} title="Edit Profile" width="max-w-md">
       <div className="p-6 space-y-4">
+
+        {/* Photo Upload */}
         <div className="flex flex-col items-center gap-2">
           <div
             onClick={() => !saving && fileInputRef.current?.click()}
@@ -460,6 +435,7 @@ function EditProfileModal({ person, open, onClose, onSave }: {
           )}
         </div>
 
+        {/* Rank + Name */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Rank</label>
@@ -480,12 +456,14 @@ function EditProfileModal({ person, open, onClose, onSave }: {
           </div>
         </div>
 
+        {/* Unit */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Unit / Assignment</label>
           <input className={cls} placeholder="e.g. DDNPPO HQ"
             value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} disabled={saving} />
         </div>
 
+        {/* Status */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
           <select className={cls} value={form.status}
@@ -499,16 +477,45 @@ function EditProfileModal({ person, open, onClose, onSave }: {
           </select>
         </div>
 
+        {/* Contact No */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Contact No.</label>
           <input className={cls} placeholder="e.g. 09171234567"
             value={form.contactNo} onChange={e => setForm(f => ({ ...f, contactNo: e.target.value }))} disabled={saving} />
         </div>
 
+        {/* Address */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Address</label>
           <textarea rows={2} className={`${cls} resize-none`} placeholder="e.g. Tagum City, Davao del Norte"
             value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} disabled={saving} />
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-slate-200 pt-2">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3">ID Numbers</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">TIN</label>
+              <input className={cls} placeholder="e.g. 123-456-789"
+                value={form.tin} onChange={e => setForm(f => ({ ...f, tin: e.target.value }))} disabled={saving} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Pag-IBIG No.</label>
+              <input className={cls} placeholder="e.g. 1234-5678-9012"
+                value={form.pagIbigNo} onChange={e => setForm(f => ({ ...f, pagIbigNo: e.target.value }))} disabled={saving} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">PhilHealth No.</label>
+              <input className={cls} placeholder="e.g. 12-345678901-2"
+                value={form.philHealthNo} onChange={e => setForm(f => ({ ...f, philHealthNo: e.target.value }))} disabled={saving} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Firearm Serial No.</label>
+              <input className={cls} placeholder="e.g. SER-2024-001"
+                value={form.firearmSerialNo} onChange={e => setForm(f => ({ ...f, firearmSerialNo: e.target.value }))} disabled={saving} />
+            </div>
+          </div>
         </div>
 
         {saving && (
@@ -566,7 +573,7 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
     <>
       <Modal open={!!person} onClose={onClose} title="Police Personal File" width="max-w-5xl">
 
-        {/* Header */}
+        {/* Blue Header */}
         <div className="border-b border-slate-200">
           <div className="bg-[#0f1c35] px-6 py-5 flex items-stretch gap-5">
             <div className="flex-shrink-0">
@@ -601,11 +608,11 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
             <div className="w-px bg-white/10 self-stretch" />
             <div className="flex-1 flex flex-col gap-2 justify-center min-w-0">
               {[
-                { label: 'Serial No.',  value: person.serialNo },
-                { label: 'Firearm No.', value: person.firearmSerialNo ?? '—' },
-                { label: 'Pag-IBIG',    value: person.pagIbigNo ?? '—' },
-                { label: 'PhilHealth',  value: person.philHealthNo ?? '—' },
-                { label: 'TIN',         value: person.tin ?? '—' },
+                { label: 'Serial No.',      value: person.serialNo },
+                { label: 'Firearm No.',     value: person.firearmSerialNo ?? '—' },
+                { label: 'Pag-IBIG',        value: person.pagIbigNo ?? '—' },
+                { label: 'PhilHealth',      value: person.philHealthNo ?? '—' },
+                { label: 'TIN',             value: person.tin ?? '—' },
               ].map(r => (
                 <div key={r.label} className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[9.5px] text-white/45 font-semibold uppercase tracking-wide whitespace-nowrap w-24 flex-shrink-0">{r.label}:</span>
@@ -677,7 +684,7 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[28%]">Document</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[18%]">Category</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[13%]">Status</th>
-                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widests text-slate-400 text-left w-[12%]">Date Updated</th>
+                  <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[12%]">Date Updated</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[9%]">Filed By</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left w-[7%]">Size</th>
                   <th className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 text-left">Actions</th>
@@ -882,7 +889,6 @@ export default function PersonnelFilesPage() {
             let documentList: Doc201Item[]
             if (docsError || !docs || docs.length === 0) {
               documentList = makeBlankChecklist(personnelId)
-
               const docsToInsert = documentList.map(d => ({
                 id:           d.id,
                 personnel_id: personnelId,
@@ -913,26 +919,26 @@ export default function PersonnelFilesPage() {
             }
 
             return {
-              id:           p.id,
-              name:         p.name,
-              rank:         p.rank,
-              serialNo:     p.serial_no    ?? '',
-              unit:         p.unit         ?? '',
-              dateCreated:  p.date_created ?? '',
-              lastUpdated:  p.last_updated ?? '',
-              initials:     p.initials     ?? '',
-              avatarColor:  p.avatar_color ?? '#3b63b8',
-              photoUrl:     p.photo_url    ?? undefined,
-              address:      p.address      ?? undefined,
-              contactNo:    p.contact_no   ?? undefined,
-              dateOfRetirement: p.date_of_retirement ?? undefined,
-              status:       p.status       ?? 'Active',
-              firearmSerialNo: p.firearm_serial_no ?? undefined,
-              pagIbigNo:    p.pag_ibig_no  ?? undefined,
-              philHealthNo: p.phil_health_no ?? undefined,
-              tin:          p.tin          ?? undefined,
-              payslipAccountNo: p.payslip_account_no ?? undefined,
-              documents:    documentList,
+              id:              p.id,
+              name:            p.name,
+              rank:            p.rank,
+              serialNo:        p.serial_no          ?? '',
+              unit:            p.unit               ?? '',
+              dateCreated:     p.date_created        ?? '',
+              lastUpdated:     p.last_updated        ?? '',
+              initials:        p.initials            ?? '',
+              avatarColor:     p.avatar_color        ?? '#3b63b8',
+              photoUrl:        p.photo_url           ?? undefined,
+              address:         p.address             ?? undefined,
+              contactNo:       p.contact_no          ?? undefined,
+              dateOfRetirement:p.date_of_retirement  ?? undefined,
+              status:          p.status              ?? 'Active',
+              firearmSerialNo: p.firearm_serial_no   ?? undefined,
+              pagIbigNo:       p.pag_ibig_no         ?? undefined,
+              philHealthNo:    p.phil_health_no      ?? undefined,
+              tin:             p.tin                 ?? undefined,
+              payslipAccountNo:p.payslip_account_no  ?? undefined,
+              documents:       documentList,
             } as Personnel201
           })
         )
@@ -990,13 +996,17 @@ export default function PersonnelFilesPage() {
     }
 
     supabase.from('personnel_201').update({
-      name:       updates.name,
-      rank:       updates.rank,
-      unit:       updates.unit,
-      status:     updates.status,
-      contact_no: updates.contactNo,
-      address:    updates.address,
-      photo_url:  updates.photoUrl ?? null,
+      name:              updates.name,
+      rank:              updates.rank,
+      unit:              updates.unit,
+      status:            updates.status,
+      contact_no:        updates.contactNo,
+      address:           updates.address,
+      photo_url:         updates.photoUrl          ?? null,
+      tin:               updates.tin               ?? null,
+      pag_ibig_no:       updates.pagIbigNo         ?? null,
+      phil_health_no:    updates.philHealthNo      ?? null,
+      firearm_serial_no: updates.firearmSerialNo   ?? null,
     }).eq('id', personId).then(({ error }) => {
       if (error) console.warn('Profile update warning:', error.message)
     })
