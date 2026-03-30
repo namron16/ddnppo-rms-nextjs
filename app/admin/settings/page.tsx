@@ -1,7 +1,7 @@
 'use client'
 // app/admin/settings/page.tsx
 
-import { useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button }     from '@/components/ui/Button'
 import { Badge }      from '@/components/ui/Badge'
@@ -83,17 +83,17 @@ interface BackupSettings {
 // ── Constants ──────────────────────────────────
 
 const ROLE_LABELS: Record<RoleKey, { label: string; color: string; desc: string }> = {
-  administrator:   { label: 'Administrator',   color: 'bg-red-100 text-red-700',     desc: 'Full system access' },
+  administrator:   { label: 'Administrator',   color: 'bg-red-100 text-red-700',       desc: 'Full system access' },
   records_officer: { label: 'Records Officer', color: 'bg-violet-100 text-violet-700', desc: 'Unit-scoped management' },
-  officer:         { label: 'Officer',         color: 'bg-blue-100 text-blue-700',   desc: 'Read + limited actions' },
+  officer:         { label: 'Officer',         color: 'bg-blue-100 text-blue-700',     desc: 'Read + limited actions' },
 }
 
 const PERMISSION_GROUPS: { label: string; perms: { key: PermKey; label: string }[] }[] = [
   {
     label: 'Master Documents',
     perms: [
-      { key: 'view_master_docs',            label: 'View Master Documents' },
-      { key: 'upload_edit_archive_master',  label: 'Upload / Edit / Archive' },
+      { key: 'view_master_docs',           label: 'View Master Documents' },
+      { key: 'upload_edit_archive_master', label: 'Upload / Edit / Archive' },
     ],
   },
   {
@@ -106,8 +106,8 @@ const PERMISSION_GROUPS: { label: string; perms: { key: PermKey; label: string }
   {
     label: '201 Files',
     perms: [
-      { key: 'view_201_files',  label: 'View 201 Files' },
-      { key: 'edit_201_files',  label: 'Edit / Update 201 Files' },
+      { key: 'view_201_files', label: 'View 201 Files' },
+      { key: 'edit_201_files', label: 'Edit / Update 201 Files' },
     ],
   },
   {
@@ -120,9 +120,9 @@ const PERMISSION_GROUPS: { label: string; perms: { key: PermKey; label: string }
   {
     label: 'Other Modules',
     perms: [
-      { key: 'view_org_chart',   label: 'View Org Chart' },
-      { key: 'view_elibrary',    label: 'View e-Library' },
-      { key: 'add_to_elibrary',  label: 'Add to e-Library' },
+      { key: 'view_org_chart',  label: 'View Org Chart' },
+      { key: 'view_elibrary',   label: 'View e-Library' },
+      { key: 'add_to_elibrary', label: 'Add to e-Library' },
     ],
   },
   {
@@ -192,8 +192,8 @@ function Toggle({
   disabled?: boolean
   size?: 'sm' | 'md'
 }) {
-  const track = size === 'sm' ? 'w-8 h-4' : 'w-10 h-5'
-  const thumb = size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5'
+  const track     = size === 'sm' ? 'w-8 h-4' : 'w-10 h-5'
+  const thumb     = size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5'
   const translate = checked ? (size === 'sm' ? 'translate-x-4' : 'translate-x-5') : 'translate-x-0.5'
 
   return (
@@ -259,7 +259,7 @@ function AccessControlTab() {
 
   const setPermission = useCallback(
     (role: RoleKey, perm: PermKey, val: boolean) => {
-      if (role === 'administrator') return // admin is locked
+      if (role === 'administrator') return
       setPermissions(prev => ({
         ...prev,
         [role]: { ...prev[role], [perm]: val },
@@ -300,8 +300,8 @@ function AccessControlTab() {
           </thead>
           <tbody>
             {PERMISSION_GROUPS.map((group, gi) => (
-              <>
-                <tr key={`group-${gi}`} className="bg-slate-50/60 border-b border-slate-100">
+              <React.Fragment key={`group-${gi}`}>
+                <tr className="bg-slate-50/60 border-b border-slate-100">
                   <td
                     colSpan={4}
                     className="px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400"
@@ -326,7 +326,7 @@ function AccessControlTab() {
                     ))}
                   </tr>
                 ))}
-              </>
+              </React.Fragment>
             ))}
           </tbody>
         </table>
@@ -453,12 +453,12 @@ function AuditNotificationsTab() {
   }
 
   const LOG_ITEMS: { key: keyof AuditLogging; label: string; desc: string }[] = [
-    { key: 'log_views',         label: 'Document Views',       desc: 'Log every time a document is opened or previewed.' },
-    { key: 'log_downloads',     label: 'Downloads',            desc: 'Log every file download action.' },
-    { key: 'log_forwards',      label: 'Document Forwards',    desc: 'Log when a document is forwarded to another user.' },
-    { key: 'log_failed_unlocks',label: 'Failed Unlock Attempts',desc: 'Log every failed classified document unlock.' },
-    { key: 'log_login_logout',  label: 'Login / Logout Events',desc: 'Track when users sign in and out of the system.' },
-    { key: 'log_201_edits',     label: '201 File Edits',       desc: 'Log profile and document updates on personnel files.' },
+    { key: 'log_views',          label: 'Document Views',        desc: 'Log every time a document is opened or previewed.' },
+    { key: 'log_downloads',      label: 'Downloads',             desc: 'Log every file download action.' },
+    { key: 'log_forwards',       label: 'Document Forwards',     desc: 'Log when a document is forwarded to another user.' },
+    { key: 'log_failed_unlocks', label: 'Failed Unlock Attempts',desc: 'Log every failed classified document unlock.' },
+    { key: 'log_login_logout',   label: 'Login / Logout Events', desc: 'Track when users sign in and out of the system.' },
+    { key: 'log_201_edits',      label: '201 File Edits',        desc: 'Log profile and document updates on personnel files.' },
   ]
 
   return (
@@ -523,12 +523,12 @@ function AuditNotificationsTab() {
 
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden">
             {[
-              { key: 'alert_on_classified_unlock' as keyof AlertSettings, label: 'Classified Document Unlocked',     desc: 'Send alert whenever any classified document is successfully unlocked.', isToggle: true },
-              { key: 'alert_on_repeated_access'  as keyof AlertSettings, label: 'Repeated Access Threshold Reached', desc: 'Alert when the same document is accessed more than the configured threshold.', isToggle: true },
-              { key: 'alert_on_failed_unlock'    as keyof AlertSettings, label: 'Failed Unlock Attempt',            desc: 'Alert on every failed classified document password attempt.', isToggle: true },
-              { key: 'alert_on_user_changes'     as keyof AlertSettings, label: 'User Account Created or Deleted',  desc: 'Alert when a system user is added or removed.', isToggle: true },
-              { key: 'alert_on_archive_delete'   as keyof AlertSettings, label: 'Document Archived or Deleted',     desc: 'Alert when any document is archived or permanently deleted.', isToggle: true },
-              { key: 'alert_on_201_submit'       as keyof AlertSettings, label: '201 File Submitted to DPRM',       desc: 'Alert when a personnel file is submitted for DPRM review.', isToggle: true },
+              { key: 'alert_on_classified_unlock' as keyof AlertSettings, label: 'Classified Document Unlocked',      desc: 'Send alert whenever any classified document is successfully unlocked.' },
+              { key: 'alert_on_repeated_access'   as keyof AlertSettings, label: 'Repeated Access Threshold Reached', desc: 'Alert when the same document is accessed more than the configured threshold.' },
+              { key: 'alert_on_failed_unlock'     as keyof AlertSettings, label: 'Failed Unlock Attempt',             desc: 'Alert on every failed classified document password attempt.' },
+              { key: 'alert_on_user_changes'      as keyof AlertSettings, label: 'User Account Created or Deleted',   desc: 'Alert when a system user is added or removed.' },
+              { key: 'alert_on_archive_delete'    as keyof AlertSettings, label: 'Document Archived or Deleted',      desc: 'Alert when any document is archived or permanently deleted.' },
+              { key: 'alert_on_201_submit'        as keyof AlertSettings, label: '201 File Submitted to DPRM',        desc: 'Alert when a personnel file is submitted for DPRM review.' },
             ].map(item => (
               <div key={item.key} className="flex items-center justify-between px-5 py-3.5">
                 <div>
@@ -671,14 +671,14 @@ function BackupExportTab() {
     backup_email: '',
   })
 
-  const [exporting, setExporting] = useState<string | null>(null)
+  const [exporting, setExporting]     = useState<string | null>(null)
   const [logDateFrom, setLogDateFrom] = useState('')
   const [logDateTo,   setLogDateTo]   = useState('')
   const [storageViewOpen, setStorageViewOpen] = useState(false)
 
   // Mock storage data
-  const storageUsed = 1.8   // GB
-  const storageTotal = 5    // GB
+  const storageUsed    = 1.8
+  const storageTotal   = 5
   const storagePercent = Math.round((storageUsed / storageTotal) * 100)
 
   const STORAGE_BREAKDOWN = [
@@ -881,10 +881,10 @@ function BackupExportTab() {
 
       <div className="space-y-2">
         {[
-          { label: 'Master Documents',  icon: '📁', desc: 'Title, level, type, date, tag' },
-          { label: 'Special Orders',    icon: '📋', desc: 'Reference, subject, date, status' },
-          { label: '201 Files Summary', icon: '📔', desc: 'Personnel info and document completion %' },
-          { label: 'Archived Documents',icon: '🗄️', desc: 'Title, type, archived date, archived by' },
+          { label: 'Master Documents',   icon: '📁', desc: 'Title, level, type, date, tag' },
+          { label: 'Special Orders',     icon: '📋', desc: 'Reference, subject, date, status' },
+          { label: '201 Files Summary',  icon: '📔', desc: 'Personnel info and document completion %' },
+          { label: 'Archived Documents', icon: '🗄️', desc: 'Title, type, archived date, archived by' },
         ].map(item => (
           <div
             key={item.label}
@@ -1005,9 +1005,9 @@ function BackupExportTab() {
 // ── Main Settings Page ─────────────────────────
 
 const TABS: { key: TabKey; label: string; icon: string; desc: string }[] = [
-  { key: 'access', label: 'Access Control',         icon: '🔐', desc: 'Roles & permissions' },
-  { key: 'audit',  label: 'Audit & Notifications',  icon: '🔔', desc: 'Logging & alerts' },
-  { key: 'backup', label: 'Backup & Export',         icon: '💾', desc: 'Data & storage' },
+  { key: 'access', label: 'Access Control',        icon: '🔐', desc: 'Roles & permissions' },
+  { key: 'audit',  label: 'Audit & Notifications', icon: '🔔', desc: 'Logging & alerts' },
+  { key: 'backup', label: 'Backup & Export',        icon: '💾', desc: 'Data & storage' },
 ]
 
 export default function SettingsPage() {
