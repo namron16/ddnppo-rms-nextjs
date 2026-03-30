@@ -1,7 +1,8 @@
 'use client'
 // app/admin/master/page.tsx
+// Enhanced with Nested Attachment / Branching File System
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { PageHeader }       from '@/components/ui/PageHeader'
 import { Badge }            from '@/components/ui/Badge'
 import { Button }           from '@/components/ui/Button'
@@ -31,31 +32,36 @@ type DocWithUrl = MasterDocument & { fileUrl?: string }
 export interface DocAttachment {
   id: string
   document_id: string
+  parent_attachment_id: string | null   // NEW: enables recursive nesting
   file_name: string
   file_url: string
   file_size: string
   file_type: string
   uploaded_at: string
   uploaded_by: string
-  archived: boolean   // always a real boolean — never undefined / null
+  archived: boolean
 }
+
+// Navigation stack entry — either a root doc or a drill-down attachment
+type NavEntry =
+  | { kind: 'doc';        doc: DocWithUrl }
+  | { kind: 'attachment'; att: DocAttachment }
 
 type Selection = { kind: 'doc'; doc: DocWithUrl }
 
 // ── Supabase helpers ───────────────────────────────────────────────────────
-
-/** Normalise a raw Supabase row so `archived` is always a proper boolean. */
 function normaliseAttachment(row: any): DocAttachment {
   return {
-    id:          row.id,
-    document_id: row.document_id,
-    file_name:   row.file_name,
-    file_url:    row.file_url,
-    file_size:   row.file_size,
-    file_type:   row.file_type,
-    uploaded_at: row.uploaded_at,
-    uploaded_by: row.uploaded_by,
-    archived:    row.archived === true,   // null / undefined / false → false
+    id:                   row.id,
+    document_id:          row.document_id,
+    parent_attachment_id: row.parent_attachment_id ?? null,
+    file_name:            row.file_name,
+    file_url:             row.file_url,
+    file_size:            row.file_size,
+    file_type:            row.file_type,
+    uploaded_at:          row.uploaded_at,
+    uploaded_by:          row.uploaded_by,
+    archived:             row.archived === true,
   }
 }
 
@@ -67,17 +73,10 @@ async function dbAddAttachment(
     .insert({ ...att, archived: false, uploaded_at: new Date().toISOString() })
     .select()
     .single()
-  if (error) {
-    console.error('addAttachment error:', error.message)
-    return null
-  }
+  if (error) { console.error('addAttachment error:', error.message); return null }
   return normaliseAttachment(data)
 }
 
-/**
- * Set archived = true in DB.
- * Returns true only when Supabase confirms the value persisted.
- */
 async function dbArchiveAttachment(id: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('master_document_attachments')
@@ -85,18 +84,10 @@ async function dbArchiveAttachment(id: string): Promise<boolean> {
     .eq('id', id)
     .select('id, archived')
     .single()
-
-  if (error) {
-    console.error('archiveAttachment DB error:', error.message)
-    return false
-  }
+  if (error) { console.error('archiveAttachment DB error:', error.message); return false }
   return data?.archived === true
 }
 
-/**
- * Set archived = false in DB.
- * Returns true only when Supabase confirms the value persisted.
- */
 async function dbRestoreAttachment(id: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('master_document_attachments')
@@ -104,11 +95,7 @@ async function dbRestoreAttachment(id: string): Promise<boolean> {
     .eq('id', id)
     .select('id, archived')
     .single()
-
-  if (error) {
-    console.error('restoreAttachment DB error:', error.message)
-    return false
-  }
+  if (error) { console.error('restoreAttachment DB error:', error.message); return false }
   return data?.archived === false
 }
 
@@ -139,13 +126,10 @@ function flattenDocs(docs: DocWithUrl[], depth = 0): FlatNode[] {
 // ══════════════════════════════════════════════════════════════════════════
 function InlineFileViewerModal({
   fileUrl, fileName, open, onClose,
-}: {
-  fileUrl: string; fileName: string; open: boolean; onClose: () => void
-}) {
+}: { fileUrl: string; fileName: string; open: boolean; onClose: () => void }) {
   const isPDF   = !!fileUrl.match(/\.pdf(\?|$)/i)
   const isImage = !!fileUrl.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)
   const fi      = fileInfo(fileName)
-
   return (
     <Modal open={open} onClose={onClose} title={`Viewing: ${fileName}`} width="max-w-5xl">
       <div className="flex flex-col" style={{ maxHeight: '85vh' }}>
@@ -155,29 +139,25 @@ function InlineFileViewerModal({
             <p className="text-xs font-semibold text-slate-700 truncate max-w-sm">{fileName}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-            <a href={fileUrl} download
-              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
+            <a href={fileUrl} download className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
               ⬇ Download
             </a>
             <Button variant="outline" size="sm" onClick={onClose}>✕ Close</Button>
           </div>
         </div>
-
         <div className="flex-1 overflow-auto bg-slate-100 min-h-0" style={{ minHeight: 400 }}>
           {isPDF ? (
             <iframe src={fileUrl} title={fileName} className="w-full border-0" style={{ height: '75vh', minHeight: 400 }} />
           ) : isImage ? (
             <div className="flex items-center justify-center p-6 min-h-96">
-              <img src={fileUrl} alt={fileName}
-                className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white" />
+              <img src={fileUrl} alt={fileName} className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white" />
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
               <span className="text-6xl mb-4">{fi.icon}</span>
               <p className="text-sm font-semibold text-slate-700 mb-1 break-all">{fileName}</p>
               <p className="text-xs text-slate-400 mb-5 max-w-xs">Preview not available. Download to view the file.</p>
-              <a href={fileUrl} download
-                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition">
+              <a href={fileUrl} download className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition">
                 ⬇ Download to view
               </a>
             </div>
@@ -195,13 +175,11 @@ function ForwardModal({ doc, open, onClose }: { doc: DocWithUrl | null; open: bo
   const { toast } = useToast()
   const [recipient, setRecipient] = useState('')
   const [remarks,   setRemarks]   = useState('')
-
   function submit() {
     if (!recipient) { toast.error('Please select a recipient.'); return }
     toast.success(`Document forwarded to ${recipient}.`)
     setRecipient(''); setRemarks(''); onClose()
   }
-
   const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
   return (
     <Modal open={open} onClose={onClose} title="Forward Document" width="max-w-md">
@@ -211,23 +189,18 @@ function ForwardModal({ doc, open, onClose }: { doc: DocWithUrl | null; open: bo
           <p className="text-sm font-semibold text-slate-800">{doc?.title}</p>
         </div>
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
-            Forward To <span className="text-red-500">*</span>
-          </label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Forward To <span className="text-red-500">*</span></label>
           <select className={cls} value={recipient} onChange={e => setRecipient(e.target.value)}>
             <option value="">Select recipient…</option>
             <option>P/Col. Ramon Dela Cruz — Provincial Director</option>
             <option>P/Capt. Sara Yap — PCADU Unit Chief</option>
             <option>P/Capt. Jun Santos — PDMU Unit Chief</option>
             <option>P/Maj. Dan Lim — PPPU Unit Chief</option>
-            <option>P/Maj. Ana Santos — PDMU</option>
-            <option>P/Insp. Jose Reyes — PCADU</option>
           </select>
         </div>
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Remarks / Instructions</label>
-          <textarea rows={3} className={`${cls} resize-none`} placeholder="Add any instructions or remarks…"
-            value={remarks} onChange={e => setRemarks(e.target.value)} />
+          <textarea rows={3} className={`${cls} resize-none`} placeholder="Add any instructions or remarks…" value={remarks} onChange={e => setRemarks(e.target.value)} />
         </div>
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -251,25 +224,20 @@ function EditModal({ doc, open, onClose, onSave }: {
   const [tag,   setTag]   = useState('COMPLIANCE')
   const [date,  setDate]  = useState('')
   const [type,  setType]  = useState('PDF')
-
   useMemo(() => {
     if (doc) { setTitle(doc.title); setLevel(doc.level); setTag(doc.tag); setDate(doc.date); setType(doc.type) }
   }, [doc])
-
   function submit() {
     if (!title.trim()) { toast.error('Title is required.'); return }
     if (!doc) return
     onSave({ ...doc, title: title.trim(), level, tag, date, type })
   }
-
   const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
   return (
     <Modal open={open} onClose={onClose} title="Edit Document" width="max-w-lg">
       <div className="p-6 space-y-4">
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
-            Document Title <span className="text-red-500">*</span>
-          </label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Document Title <span className="text-red-500">*</span></label>
           <input className={cls} value={title} onChange={e => setTitle(e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -316,11 +284,53 @@ function EditModal({ doc, open, onClose, onSave }: {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Attachments Table Panel
+// Breadcrumb Component
+// ══════════════════════════════════════════════════════════════════════════
+function Breadcrumb({
+  navStack,
+  onNavigateTo,
+}: {
+  navStack: NavEntry[]
+  onNavigateTo: (index: number) => void
+}) {
+  if (navStack.length <= 1) return null
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap px-1 py-2 mb-3">
+      {navStack.map((entry, i) => {
+        const label = entry.kind === 'doc' ? entry.doc.title : entry.att.file_name
+        const isLast = i === navStack.length - 1
+        return (
+          <span key={i} className="flex items-center gap-1">
+            {i > 0 && <span className="text-slate-300 text-xs">›</span>}
+            {isLast ? (
+              <span className="text-[11px] font-bold text-blue-600 truncate max-w-[160px]" title={label}>
+                {label.length > 22 ? label.slice(0, 21) + '…' : label}
+              </span>
+            ) : (
+              <button
+                onClick={() => onNavigateTo(i)}
+                className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline truncate max-w-[120px] transition"
+                title={label}
+              >
+                {label.length > 18 ? label.slice(0, 17) + '…' : label}
+              </button>
+            )}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Attachments Table Panel (used for both root docs AND drill-down attachments)
 // ══════════════════════════════════════════════════════════════════════════
 function AttachmentsTablePanel({
-  doc,
+  navStack,
+  currentEntry,
   attachments,
+  allAttachments,
   onUpload,
   uploadingId,
   onForward,
@@ -329,10 +339,14 @@ function AttachmentsTablePanel({
   onViewFile,
   onArchiveAttachment,
   onRestoreAttachment,
+  onDrillDown,
+  onNavigateTo,
 }: {
-  doc: DocWithUrl
+  navStack: NavEntry[]
+  currentEntry: NavEntry
   attachments: DocAttachment[]
-  onUpload: (docId: string, files: FileList) => void
+  allAttachments: Map<string, DocAttachment[]>  // keyed by attachment id for child lookups
+  onUpload: (parentDocId: string, parentAttId: string | null, files: FileList) => void
   uploadingId: string | null
   onForward: () => void
   onEdit: () => void
@@ -340,6 +354,8 @@ function AttachmentsTablePanel({
   onViewFile: (fileUrl: string, fileName: string) => void
   onArchiveAttachment: (att: DocAttachment) => void
   onRestoreAttachment: (att: DocAttachment) => void
+  onDrillDown: (att: DocAttachment) => void
+  onNavigateTo: (index: number) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [showArchived, setShowArchived] = useState(false)
@@ -348,60 +364,133 @@ function AttachmentsTablePanel({
   const archivedAttachments = attachments.filter(a =>  a.archived)
   const displayed           = showArchived ? archivedAttachments : activeAttachments
 
-  const pathLabel =
-    doc.level === 'STATION'    ? 'Regional → Provincial → Station' :
-    doc.level === 'PROVINCIAL' ? 'Regional → Provincial' : 'Regional'
+  // Determine current context label and metadata
+  const isDrillDown = currentEntry.kind === 'attachment'
+  const currentLabel = isDrillDown ? currentEntry.att.file_name : currentEntry.doc.title
 
+  // For drill-down: get the root doc id and current parent_attachment_id
+  const rootDocId = navStack[0].kind === 'doc' ? navStack[0].doc.id : ''
+  const parentAttId = isDrillDown ? currentEntry.att.id : null
+
+  // Count children for each attachment (active only)
+  function childCount(attId: string): number {
+    return (allAttachments.get(attId) ?? []).filter(a => !a.archived).length
+  }
+
+  // File & metadata for drill-down header
+  const drillAtt = isDrillDown ? currentEntry.att : null
+  const drillFi = drillAtt ? fileInfo(drillAtt.file_name) : null
   const typeIcon =
-    doc.type === 'PDF'  ? '📕' :
-    doc.type === 'DOCX' ? '📘' :
-    doc.type === 'XLSX' ? '📗' : '🖼️'
+    !isDrillDown
+      ? (currentEntry.doc.type === 'PDF'  ? '📕' :
+         currentEntry.doc.type === 'DOCX' ? '📘' :
+         currentEntry.doc.type === 'XLSX' ? '📗' : '🖼️')
+      : (drillFi?.icon ?? '📄')
 
   return (
     <div className="animate-fade-up h-full flex flex-col">
-      {/* Breadcrumb */}
-      <div className="text-xs text-slate-400 flex items-center gap-1 mb-2 flex-wrap">
-        {pathLabel.split(' → ').map((p, i, arr) => (
-          <span key={i} className="flex items-center gap-1">
-            {i > 0 && <span className="text-slate-300">→</span>}
-            <span className={i === arr.length - 1 ? 'text-blue-600 font-medium' : ''}>{p}</span>
-          </span>
-        ))}
-      </div>
+
+      {/* Breadcrumb navigation */}
+      <Breadcrumb navStack={navStack} onNavigateTo={onNavigateTo} />
+
+      {/* Back button (shown when drilled down) */}
+      {navStack.length > 1 && (
+        <button
+          onClick={() => onNavigateTo(navStack.length - 2)}
+          className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition mb-3 group"
+        >
+          <span className="w-5 h-5 rounded-full bg-slate-100 group-hover:bg-blue-50 flex items-center justify-center text-[10px] transition">←</span>
+          Back to {navStack.length >= 2
+            ? (navStack[navStack.length - 2].kind === 'doc'
+                ? (navStack[navStack.length - 2] as { kind: 'doc'; doc: DocWithUrl }).doc.title
+                : (navStack[navStack.length - 2] as { kind: 'attachment'; att: DocAttachment }).att.file_name)
+            : 'Documents'}
+        </button>
+      )}
 
       {/* Title + actions */}
-      <div className="flex items-start justify-between mb-5 gap-4">
-        <div className="min-w-0">
-          <h2 className="text-xl font-extrabold text-slate-800 leading-tight truncate">{doc.title}</h2>
-          <div className="flex items-center gap-2 flex-wrap mt-1.5">
-            <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">📅 {doc.date}</span>
-            <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{typeIcon} {doc.type} · {doc.size}</span>
-            <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{doc.tag}</Badge>
-            <Badge className={levelBadgeClass(doc.level)}>{doc.level}</Badge>
+      <div className="flex items-start justify-between mb-4 gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl flex-shrink-0">{typeIcon}</span>
+            <h2 className="text-lg font-extrabold text-slate-800 leading-tight truncate">{currentLabel}</h2>
+            {isDrillDown && (
+              <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                📎 Nested File
+              </span>
+            )}
           </div>
+          {isDrillDown && drillAtt && (
+            <div className="flex items-center gap-2 flex-wrap mt-1">
+              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                {drillFi?.label}
+              </span>
+              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                {drillAtt.file_size}
+              </span>
+              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                📅 {new Date(drillAtt.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
+              </span>
+            </div>
+          )}
+          {!isDrillDown && (
+            <div className="flex items-center gap-2 flex-wrap mt-1">
+              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">📅 {currentEntry.doc.date}</span>
+              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{typeIcon} {currentEntry.doc.type} · {currentEntry.doc.size}</span>
+              <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{currentEntry.doc.tag}</Badge>
+              <Badge className={levelBadgeClass(currentEntry.doc.level)}>{currentEntry.doc.level}</Badge>
+            </div>
+          )}
         </div>
-        <div className="flex gap-2 flex-shrink-0">
-          <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
-          <Button variant="outline" size="sm" onClick={onEdit}>✏️ Edit</Button>
-          <Button variant="danger"  size="sm" onClick={onArchiveDoc}>🗄️ Archive</Button>
-        </div>
+
+        {/* Action buttons — only for root doc level */}
+        {!isDrillDown && (
+          <div className="flex gap-2 flex-shrink-0">
+            <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
+            <Button variant="outline" size="sm" onClick={onEdit}>✏️ Edit</Button>
+            <Button variant="danger"  size="sm" onClick={onArchiveDoc}>🗄️ Archive</Button>
+          </div>
+        )}
+
+        {/* For drill-down: view + download the file itself */}
+        {isDrillDown && drillAtt && (
+          <div className="flex gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => onViewFile(drillAtt.file_url, drillAtt.file_name)}
+              className="text-xs px-2.5 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-semibold hover:bg-blue-100 transition"
+            >
+              👁 View File
+            </button>
+            <a href={drillAtt.file_url} download target="_blank" rel="noopener noreferrer"
+              className="text-xs px-2.5 py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-semibold hover:bg-slate-200 transition"
+            >
+              ⬇ Download
+            </a>
+            <button
+              onClick={() => onArchiveAttachment(drillAtt)}
+              className="text-xs px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-semibold hover:bg-amber-100 transition"
+            >
+              🗄️ Archive
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Primary file */}
-      {doc.fileUrl && (
+      {/* Primary file preview strip (root doc only) */}
+      {!isDrillDown && currentEntry.doc.fileUrl && (
         <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
           <span className="text-lg flex-shrink-0">{typeIcon}</span>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
-            <p className="text-xs text-blue-600 truncate">{doc.title}.{doc.type.toLowerCase()}</p>
+            <p className="text-xs text-blue-600 truncate">{currentEntry.doc.title}.{currentEntry.doc.type.toLowerCase()}</p>
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
-            <a href={doc.fileUrl} download target="_blank" rel="noopener noreferrer"
+            <a href={currentEntry.doc.fileUrl} download target="_blank" rel="noopener noreferrer"
               className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
               ⬇ Download
             </a>
             <button
-              onClick={() => onViewFile(doc.fileUrl!, doc.title)}
+              onClick={() => onViewFile(currentEntry.doc.fileUrl!, currentEntry.doc.title)}
               className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
             >
               👁 View
@@ -416,7 +505,9 @@ function AttachmentsTablePanel({
         {/* Toolbar */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Attachments</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+              {isDrillDown ? '📎 Child Attachments' : 'Attachments'}
+            </span>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowArchived(false)}
@@ -438,7 +529,7 @@ function AttachmentsTablePanel({
           </div>
 
           <div className="flex items-center gap-2">
-            {uploadingId === doc.id && (
+            {uploadingId && (
               <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium">
                 <span className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin block" />
                 Uploading…
@@ -451,12 +542,13 @@ function AttachmentsTablePanel({
               accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
               className="hidden"
               onChange={e => {
-                if (e.target.files && e.target.files.length > 0) onUpload(doc.id, e.target.files)
+                if (e.target.files && e.target.files.length > 0)
+                  onUpload(rootDocId, parentAttId, e.target.files)
                 e.target.value = ''
               }}
             />
             {!showArchived && (
-              <Button variant="primary" size="sm" disabled={uploadingId === doc.id}
+              <Button variant="primary" size="sm" disabled={!!uploadingId}
                 onClick={() => fileInputRef.current?.click()}>
                 + Attach file
               </Button>
@@ -468,15 +560,17 @@ function AttachmentsTablePanel({
         {displayed.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-14 px-6">
             <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-2xl mb-3">
-              {showArchived ? '🗄️' : '📂'}
+              {showArchived ? '🗄️' : isDrillDown ? '📎' : '📂'}
             </div>
             <p className="text-sm font-semibold text-slate-600 mb-1">
-              {showArchived ? 'No archived attachments' : 'No attachments yet'}
+              {showArchived ? 'No archived attachments' : `No ${isDrillDown ? 'child ' : ''}attachments yet`}
             </p>
             <p className="text-xs text-slate-400 mb-4 max-w-xs">
               {showArchived
                 ? 'Files you archive will appear here and can be restored.'
-                : 'Click + Attach file above to upload supporting documents.'}
+                : isDrillDown
+                  ? 'Click + Attach file to add child files under this attachment.'
+                  : 'Click + Attach file above to upload supporting documents.'}
             </p>
             {!showArchived && (
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
@@ -494,26 +588,41 @@ function AttachmentsTablePanel({
                   <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">Size</th>
                   <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[130px]">Uploaded</th>
                   <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">By</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[140px]">Actions</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">Children</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[180px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {displayed.map(att => {
                   const fi = fileInfo(att.file_name)
+                  const children = childCount(att.id)
                   return (
                     <tr key={att.id}
                       className={`border-b border-slate-100 transition-colors group ${
-                        att.archived ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-blue-50'
+                        att.archived ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-blue-50/50'
                       }`}
                     >
+                      {/* File name — clickable to drill down */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <span className="text-base flex-shrink-0 leading-none">{fi.icon}</span>
-                          <span className={`text-sm font-semibold truncate max-w-[280px] ${
-                            att.archived ? 'text-slate-400 line-through' : 'text-slate-800'
-                          }`}>
+                          <button
+                            disabled={att.archived}
+                            onClick={() => !att.archived && onDrillDown(att)}
+                            className={`text-sm font-semibold truncate max-w-[240px] text-left transition ${
+                              att.archived
+                                ? 'text-slate-400 line-through cursor-default'
+                                : 'text-slate-800 hover:text-blue-600 hover:underline cursor-pointer'
+                            }`}
+                            title={att.archived ? att.file_name : `Click to explore ${att.file_name}`}
+                          >
                             {att.file_name}
-                          </span>
+                          </button>
+                          {!att.archived && (
+                            <span className="flex-shrink-0 text-[9px] font-bold text-slate-300 group-hover:text-blue-400 transition">
+                              ›
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -523,11 +632,23 @@ function AttachmentsTablePanel({
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{att.file_size}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">
-                        {new Date(att.uploaded_at).toLocaleDateString('en-PH', {
-                          year: 'numeric', month: 'short', day: 'numeric',
-                        })}
+                        {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{att.uploaded_by}</td>
+                      {/* Children count */}
+                      <td className="px-4 py-3">
+                        {!att.archived && children > 0 ? (
+                          <button
+                            onClick={() => onDrillDown(att)}
+                            className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-full transition"
+                          >
+                            📎 {children}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </td>
+                      {/* Actions */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {!att.archived ? (
@@ -544,10 +665,17 @@ function AttachmentsTablePanel({
                                 </button>
                               </a>
                               <button
+                                onClick={() => onDrillDown(att)}
+                                className="text-[10px] font-semibold px-2 py-1 bg-violet-50 text-violet-700 border border-violet-200 rounded hover:bg-violet-100 transition"
+                                title="Open & explore this file's attachments"
+                              >
+                                📂 Open
+                              </button>
+                              <button
                                 onClick={() => onArchiveAttachment(att)}
                                 className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition"
                               >
-                                🗄️ Archive
+                                🗄️
                               </button>
                             </>
                           ) : (
@@ -573,7 +701,7 @@ function AttachmentsTablePanel({
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Left-panel tree node (no expand/collapse — click = view attachments)
+// Left-panel tree node
 // ══════════════════════════════════════════════════════════════════════════
 function DocTreeNode({
   doc, depth, isSelected, onSelectDoc, attachmentsMap, uploadingId,
@@ -585,14 +713,12 @@ function DocTreeNode({
   attachmentsMap: Map<string, DocAttachment[]>
   uploadingId: string | null
 }) {
-  const activeCount = (attachmentsMap.get(doc.id) ?? []).filter(a => !a.archived).length
+  const activeCount = (attachmentsMap.get(doc.id) ?? []).filter(a => !a.archived && !a.parent_attachment_id).length
   const levelColor  =
     doc.level === 'REGIONAL'   ? '#3b63b8' :
     doc.level === 'PROVINCIAL' ? '#f59e0b' : '#10b981'
-
   const indentPx = depth * 16 + 8
   const rowWidth  = `calc(100% - ${indentPx + 8}px)`
-
   return (
     <div
       style={{ marginLeft: indentPx, width: rowWidth }}
@@ -601,12 +727,8 @@ function DocTreeNode({
       }`}
       onClick={() => onSelectDoc(doc)}
     >
-      <span
-        className={`w-2 h-2 rounded-full flex-shrink-0 ${isSelected ? 'opacity-70' : ''}`}
-        style={{ background: levelColor }}
-      />
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isSelected ? 'opacity-70' : ''}`} style={{ background: levelColor }} />
       <span className="flex-1 truncate text-[13px] font-medium">{doc.title}</span>
-
       {activeCount > 0 && (
         <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
           isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
@@ -614,7 +736,6 @@ function DocTreeNode({
           📎{activeCount}
         </span>
       )}
-
       {uploadingId === doc.id && (
         <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin block flex-shrink-0 opacity-70" />
       )}
@@ -632,10 +753,15 @@ export default function MasterPage() {
   const [query,          setQuery]          = useState('')
   const [levelFilter,    setLevel]          = useState<DocLevel | 'ALL'>('ALL')
   const [loading,        setLoading]        = useState(true)
+  // attachmentsMap: keyed by document_id for root-level, and by attachment id for nested
   const [attachmentsMap, setAttachmentsMap] = useState<Map<string, DocAttachment[]>>(new Map())
   const [selection,      setSelection]      = useState<Selection | null>(null)
   const [uploadingId,    setUploadingId]    = useState<string | null>(null)
   const [archivingAtt,   setArchivingAtt]   = useState(false)
+
+  // ── Navigation stack for drill-down ─────────────────────────────────────
+  // Each entry is either a root doc or an attachment we drilled into
+  const [navStack, setNavStack] = useState<NavEntry[]>([])
 
   const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null)
 
@@ -645,12 +771,26 @@ export default function MasterPage() {
   const editModal      = useModal()
   const archiveDisc    = useDisclosure<string>()
 
+  // ── Current visible entry in the drill-down stack ─────────────────────
+  const currentEntry: NavEntry | null = navStack.length > 0 ? navStack[navStack.length - 1] : null
+
+  // ── Get attachments for current nav entry ─────────────────────────────
+  const currentAttachments = useMemo((): DocAttachment[] => {
+    if (!currentEntry) return []
+    if (currentEntry.kind === 'doc') {
+      // Root doc: show only top-level attachments (parent_attachment_id === null)
+      return (attachmentsMap.get(currentEntry.doc.id) ?? []).filter(a => !a.parent_attachment_id)
+    } else {
+      // Drilled into an attachment: show its children
+      return attachmentsMap.get(currentEntry.att.id) ?? []
+    }
+  }, [currentEntry, attachmentsMap])
+
   // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadAll() {
       try {
         const [docs, archived] = await Promise.all([getMasterDocuments(), getArchivedDocs()])
-
         const archivedIds = new Set(
           (archived ?? [])
             .map((a: any) => String(a.id ?? ''))
@@ -671,18 +811,27 @@ export default function MasterPage() {
           if (error) {
             console.error('Failed to load attachments:', error.message)
           } else {
+            // Build a multi-level map:
+            //   - by document_id → root-level attachments (parent_attachment_id null)
+            //   - by parent_attachment_id → child attachments
             const map = new Map<string, DocAttachment[]>()
             for (const row of (allAtts ?? [])) {
-              const att  = normaliseAttachment(row)
-              const list = map.get(att.document_id) ?? []
+              const att = normaliseAttachment(row)
+              // Key: parent_attachment_id if nested, else document_id
+              const key = att.parent_attachment_id ?? att.document_id
+              const list = map.get(key) ?? []
               list.push(att)
-              map.set(att.document_id, list)
+              map.set(key, list)
             }
             setAttachmentsMap(map)
           }
         }
 
-        if (activeDocs.length > 0) setSelection({ kind: 'doc', doc: activeDocs[0] })
+        if (activeDocs.length > 0) {
+          const firstDoc = activeDocs[0]
+          setSelection({ kind: 'doc', doc: firstDoc })
+          setNavStack([{ kind: 'doc', doc: firstDoc }])
+        }
       } catch (err) {
         console.error('loadAll error:', err)
       } finally {
@@ -692,12 +841,29 @@ export default function MasterPage() {
     loadAll()
   }, [])
 
-  // ── Upload ───────────────────────────────────────────────────────────────
-  async function handleUpload(docId: string, files: FileList) {
-    setUploadingId(docId)
+  // ── When user clicks a doc in the left panel ──────────────────────────
+  function handleSelectDoc(doc: DocWithUrl) {
+    setSelection({ kind: 'doc', doc })
+    setNavStack([{ kind: 'doc', doc }])
+  }
+
+  // ── Drill down into an attachment ─────────────────────────────────────
+  function handleDrillDown(att: DocAttachment) {
+    setNavStack(prev => [...prev, { kind: 'attachment', att }])
+  }
+
+  // ── Navigate to a specific stack index ────────────────────────────────
+  function handleNavigateTo(index: number) {
+    setNavStack(prev => prev.slice(0, index + 1))
+  }
+
+  // ── Upload (supports both root-doc attachments and nested child attachments)
+  async function handleUpload(parentDocId: string, parentAttId: string | null, files: FileList) {
+    setUploadingId(parentAttId ?? parentDocId)
     let count = 0
     for (const file of Array.from(files)) {
-      const fileName = `master-docs/attachments/${docId}/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
+      const folder   = parentAttId ? `master-docs/attachments/${parentDocId}/nested/${parentAttId}` : `master-docs/attachments/${parentDocId}`
+      const fileName = `${folder}/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
       const { data: storageData, error: storageError } = await supabase.storage
         .from('documents')
         .upload(fileName, file, { cacheControl: '3600', upsert: false })
@@ -705,21 +871,23 @@ export default function MasterPage() {
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
       const ext    = file.name.split('.').pop()?.toUpperCase() ?? 'FILE'
       const newAtt = await dbAddAttachment({
-        id:          `att-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        document_id: docId,
-        file_name:   file.name,
-        file_url:    urlData.publicUrl,
-        file_size:   file.size < 1024 * 1024
-                       ? `${(file.size / 1024).toFixed(1)} KB`
-                       : `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        file_type:   ext,
-        uploaded_by: 'Admin',
-        archived:    false,
+        id:                   `att-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        document_id:          parentDocId,
+        parent_attachment_id: parentAttId,
+        file_name:            file.name,
+        file_url:             urlData.publicUrl,
+        file_size:            file.size < 1024 * 1024
+                                ? `${(file.size / 1024).toFixed(1)} KB`
+                                : `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+        file_type:            ext,
+        uploaded_by:          'Admin',
+        archived:             false,
       })
       if (newAtt) {
+        const mapKey = parentAttId ?? parentDocId
         setAttachmentsMap(prev => {
           const next = new Map(prev)
-          next.set(docId, [...(next.get(docId) ?? []), newAtt])
+          next.set(mapKey, [...(next.get(mapKey) ?? []), newAtt])
           return next
         })
         count++
@@ -729,18 +897,22 @@ export default function MasterPage() {
     setUploadingId(null)
   }
 
-  // ── Document CRUD ─────────────────────────────────────────────────────────
+  // ── Document CRUD ─────────────────────────────────────────────────────
   async function handleAdd(newDoc: DocWithUrl) {
     await addMasterDocument(newDoc)
     setDocuments(prev => [...prev, newDoc])
     setAttachmentsMap(prev => { const next = new Map(prev); next.set(newDoc.id, []); return next })
     setSelection({ kind: 'doc', doc: newDoc })
+    setNavStack([{ kind: 'doc', doc: newDoc }])
   }
 
   async function handleSave(updated: DocWithUrl) {
     await updateMasterDocument(updated)
     setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d))
-    if (selection?.doc.id === updated.id) setSelection({ kind: 'doc', doc: updated })
+    if (selection?.doc.id === updated.id) {
+      setSelection({ kind: 'doc', doc: updated })
+      setNavStack(prev => prev.map(e => e.kind === 'doc' && e.doc.id === updated.id ? { kind: 'doc', doc: updated } : e))
+    }
     toast.success('Document updated.')
     editModal.close()
   }
@@ -753,12 +925,12 @@ export default function MasterPage() {
     await archiveMasterDocument(doc.id)
     setDocuments(prev => prev.filter(d => d.id !== doc.id))
     setSelection(null)
+    setNavStack([])
     toast.success('Document archived.')
     archiveDisc.close()
   }
 
-  // ── Archive attachment ────────────────────────────────────────────────────
-  // UI state is only updated AFTER the DB write is verified successful.
+  // ── Archive attachment (any level) ────────────────────────────────────
   async function handleArchiveAttachment() {
     const att = archiveAttDisc.payload
     if (!att) return
@@ -766,53 +938,42 @@ export default function MasterPage() {
     try {
       const ok = await dbArchiveAttachment(att.id)
       if (!ok) {
-        toast.error(
-          'Could not archive attachment — the database update failed. ' +
-          'Make sure the `archived` column exists by running the SQL migration.'
-        )
+        toast.error('Could not archive attachment — the database update failed.')
         return
       }
-      // DB confirmed ✓ — now safe to update local state
+      const mapKey = att.parent_attachment_id ?? att.document_id
       setAttachmentsMap(prev => {
         const next = new Map(prev)
-        for (const [docId, list] of next) {
-          if (list.some(a => a.id === att.id)) {
-            next.set(docId, list.map(a => a.id === att.id ? { ...a, archived: true } : a))
-            break
-          }
-        }
+        const list = next.get(mapKey) ?? []
+        next.set(mapKey, list.map(a => a.id === att.id ? { ...a, archived: true } : a))
         return next
       })
       toast.success(`"${att.file_name}" archived.`)
       archiveAttDisc.close()
+      // If we were viewing this attachment, pop back
+      if (currentEntry?.kind === 'attachment' && currentEntry.att.id === att.id) {
+        setNavStack(prev => prev.slice(0, -1))
+      }
     } finally {
       setArchivingAtt(false)
     }
   }
 
-  // ── Restore attachment ────────────────────────────────────────────────────
-  // UI state is only updated AFTER the DB write is verified successful.
+  // ── Restore attachment ────────────────────────────────────────────────
   async function handleRestoreAttachment(att: DocAttachment) {
     const ok = await dbRestoreAttachment(att.id)
-    if (!ok) {
-      toast.error('Could not restore attachment — the database update failed.')
-      return
-    }
-    // DB confirmed ✓ — now safe to update local state
+    if (!ok) { toast.error('Could not restore attachment.'); return }
+    const mapKey = att.parent_attachment_id ?? att.document_id
     setAttachmentsMap(prev => {
       const next = new Map(prev)
-      for (const [docId, list] of next) {
-        if (list.some(a => a.id === att.id)) {
-          next.set(docId, list.map(a => a.id === att.id ? { ...a, archived: false } : a))
-          break
-        }
-      }
+      const list = next.get(mapKey) ?? []
+      next.set(mapKey, list.map(a => a.id === att.id ? { ...a, archived: false } : a))
       return next
     })
     toast.success(`"${att.file_name}" restored.`)
   }
 
-  // ── Filtered list ─────────────────────────────────────────────────────────
+  // ── Filtered list ─────────────────────────────────────────────────────
   const allFlat  = useMemo(() => flattenDocs(documents), [documents])
   const filtered = useMemo(() => allFlat.filter(({ doc }) => {
     const q = query.trim().toLowerCase()
@@ -820,9 +981,9 @@ export default function MasterPage() {
            (levelFilter === 'ALL' || doc.level === levelFilter)
   }), [allFlat, query, levelFilter])
 
-  const activeDoc = selection?.doc ?? null
+  const activeDocForModals = selection?.doc ?? null
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────
   return (
     <>
       <PageHeader title="Master Documents" />
@@ -874,7 +1035,7 @@ export default function MasterPage() {
                       doc={doc}
                       depth={depth}
                       isSelected={selection?.doc.id === doc.id}
-                      onSelectDoc={d => setSelection({ kind: 'doc', doc: d })}
+                      onSelectDoc={handleSelectDoc}
                       attachmentsMap={attachmentsMap}
                       uploadingId={uploadingId}
                     />
@@ -882,6 +1043,7 @@ export default function MasterPage() {
                 )}
               </div>
 
+              {/* Legend */}
               <div className="px-4 py-3 border-t border-slate-100 space-y-1.5 flex-shrink-0">
                 {[
                   { color: '#3b63b8', label: 'Regional' },
@@ -893,12 +1055,15 @@ export default function MasterPage() {
                     <span className="text-[11px] text-slate-400">{l.label}</span>
                   </div>
                 ))}
+                <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-1">
+                  <span className="text-[11px] text-slate-400">📎 = top-level attachments</span>
+                </div>
               </div>
             </div>
 
-            {/* Right: attachment detail */}
+            {/* Right: attachment detail with drill-down */}
             <div className="flex-1 overflow-y-auto p-6">
-              {!selection ? (
+              {!currentEntry ? (
                 <div className="h-full flex items-center justify-center">
                   <EmptyState
                     icon="📄"
@@ -909,16 +1074,20 @@ export default function MasterPage() {
                 </div>
               ) : (
                 <AttachmentsTablePanel
-                  doc={selection.doc}
-                  attachments={attachmentsMap.get(selection.doc.id) ?? []}
+                  navStack={navStack}
+                  currentEntry={currentEntry}
+                  attachments={currentAttachments}
+                  allAttachments={attachmentsMap}
                   onUpload={handleUpload}
                   uploadingId={uploadingId}
                   onForward={forwardModal.open}
                   onEdit={editModal.open}
-                  onArchiveDoc={() => archiveDisc.open(selection.doc.title)}
+                  onArchiveDoc={() => selection && archiveDisc.open(selection.doc.title)}
                   onViewFile={(url, name) => setViewerFile({ url, name })}
                   onArchiveAttachment={att => archiveAttDisc.open(att)}
                   onRestoreAttachment={handleRestoreAttachment}
+                  onDrillDown={handleDrillDown}
+                  onNavigateTo={handleNavigateTo}
                 />
               )}
             </div>
@@ -928,8 +1097,8 @@ export default function MasterPage() {
 
       {/* Modals */}
       <AddDocumentModal open={uploadModal.isOpen}  onClose={uploadModal.close}  onAdd={handleAdd} />
-      <ForwardModal     doc={activeDoc}             open={forwardModal.isOpen}   onClose={forwardModal.close} />
-      <EditModal        doc={activeDoc}             open={editModal.isOpen}      onClose={editModal.close} onSave={handleSave} />
+      <ForwardModal     doc={activeDocForModals}    open={forwardModal.isOpen}   onClose={forwardModal.close} />
+      <EditModal        doc={activeDocForModals}    open={editModal.isOpen}      onClose={editModal.close} onSave={handleSave} />
 
       {viewerFile && (
         <InlineFileViewerModal
