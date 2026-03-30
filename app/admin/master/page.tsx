@@ -40,7 +40,6 @@ export interface DocAttachment {
   uploaded_by: string
 }
 
-// A "selection" is either a document or one of its attachments
 type Selection =
   | { kind: 'doc';        doc: DocWithUrl }
   | { kind: 'attachment'; doc: DocWithUrl; attachment: DocAttachment }
@@ -70,11 +69,11 @@ async function removeAttachment(id: string, fileUrl?: string): Promise<void> {
 
 // ── File-type helpers ──────────────────────────────────────────────────────
 function fileInfo(name: string) {
-  if (name.match(/\.pdf$/i))               return { icon: '📕', label: 'PDF',  color: 'text-red-600',    bg: 'bg-red-50',    border: 'border-red-200' }
-  if (name.match(/\.docx?$/i))             return { icon: '📘', label: 'DOCX', color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200' }
-  if (name.match(/\.xlsx?$/i))             return { icon: '📗', label: 'XLSX', color: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200' }
-  if (name.match(/\.(jpg|jpeg|png|webp)$/i)) return { icon: '🖼️', label: 'IMG', color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200' }
-  return { icon: '📄', label: 'FILE', color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-200' }
+  if (name.match(/\.pdf$/i))                return { icon: '📕', label: 'PDF',  color: 'text-red-600',    bg: 'bg-red-50',    border: 'border-red-200',    badgeCls: 'bg-red-100 text-red-700'      }
+  if (name.match(/\.docx?$/i))              return { icon: '📘', label: 'DOCX', color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200',   badgeCls: 'bg-blue-100 text-blue-700'    }
+  if (name.match(/\.xlsx?$/i))              return { icon: '📗', label: 'XLSX', color: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badgeCls: 'bg-green-100 text-green-700'  }
+  if (name.match(/\.(jpg|jpeg|png|webp)$/i)) return { icon: '🖼️', label: 'IMG', color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200', badgeCls: 'bg-violet-100 text-violet-700' }
+  return { icon: '📄', label: 'FILE', color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-200', badgeCls: 'bg-slate-100 text-slate-600' }
 }
 
 // ── Flatten doc tree ───────────────────────────────────────────────────────
@@ -210,15 +209,29 @@ function EditModal({ doc, open, onClose, onSave }: {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Right panel — Document detail
+// Attachments Table Panel (shown when a parent doc is selected)
 // ══════════════════════════════════════════════════════════════════════════
-function DocDetailPanel({ doc, onForward, onEdit, onArchive, attachmentCount }: {
+function AttachmentsTablePanel({
+  doc,
+  attachments,
+  onSelectAttachment,
+  onUpload,
+  uploadingId,
+  onForward,
+  onEdit,
+  onArchive,
+}: {
   doc: DocWithUrl
+  attachments: DocAttachment[]
+  onSelectAttachment: (doc: DocWithUrl, att: DocAttachment) => void
+  onUpload: (docId: string, files: FileList) => void
+  uploadingId: string | null
   onForward: () => void
   onEdit: () => void
   onArchive: () => void
-  attachmentCount: number
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const pathLabel =
     doc.level === 'STATION'    ? 'Regional → Provincial → Station' :
     doc.level === 'PROVINCIAL' ? 'Regional → Provincial' : 'Regional'
@@ -227,9 +240,6 @@ function DocDetailPanel({ doc, onForward, onEdit, onArchive, attachmentCount }: 
     doc.type === 'PDF'  ? '📕' :
     doc.type === 'DOCX' ? '📘' :
     doc.type === 'XLSX' ? '📗' : '🖼️'
-
-  const isImage = !!doc.fileUrl?.match(/\.(jpg|jpeg|png|webp)$/i)
-  const isPDF   = doc.type === 'PDF' || !!doc.fileUrl?.endsWith('.pdf')
 
   return (
     <div className="animate-fade-up h-full flex flex-col">
@@ -243,66 +253,154 @@ function DocDetailPanel({ doc, onForward, onEdit, onArchive, attachmentCount }: 
         ))}
       </div>
 
-      <h2 className="text-xl font-extrabold text-slate-800 leading-tight mb-3">{doc.title}</h2>
-
-      <div className="flex items-center gap-2 flex-wrap mb-4">
-        <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">📅 {doc.date}</span>
-        <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{typeIcon} {doc.type} · {doc.size}</span>
-        <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{doc.tag}</Badge>
-        <Badge className={levelBadgeClass(doc.level)}>{doc.level}</Badge>
-        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
-          attachmentCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-400 border-slate-200'
-        }`}>
-          📎 {attachmentCount} attachment{attachmentCount !== 1 ? 's' : ''}
-        </span>
+      {/* Title + meta + actions row */}
+      <div className="flex items-start justify-between mb-5 gap-4">
+        <div className="min-w-0">
+          <h2 className="text-xl font-extrabold text-slate-800 leading-tight truncate">{doc.title}</h2>
+          <div className="flex items-center gap-2 flex-wrap mt-1.5">
+            <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">📅 {doc.date}</span>
+            <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{typeIcon} {doc.type} · {doc.size}</span>
+            <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{doc.tag}</Badge>
+            <Badge className={levelBadgeClass(doc.level)}>{doc.level}</Badge>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-shrink-0">
+          <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
+          <Button variant="outline" size="sm" onClick={onEdit}>✏️ Edit</Button>
+          <Button variant="danger"  size="sm" onClick={onArchive}>🗄️ Archive</Button>
+        </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex gap-2 flex-wrap mb-5">
-        <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
-        <Button variant="outline" size="sm" onClick={onEdit}>✏️ Edit</Button>
-        <Button variant="danger"  size="sm" onClick={onArchive}>🗄️ Archive</Button>
-      </div>
+      {/* Primary file quick-access (if doc has a direct fileUrl) */}
+      {doc.fileUrl && (
+        <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+          <span className="text-lg flex-shrink-0">{typeIcon}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
+            <p className="text-xs text-blue-600 truncate">{doc.title}.{doc.type.toLowerCase()}</p>
+          </div>
+          <div className="flex gap-1.5 flex-shrink-0">
+            <a href={doc.fileUrl} download target="_blank" rel="noopener noreferrer"
+              className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
+              ⬇ Download
+            </a>
+            <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+              className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
+              🔗 Open
+            </a>
+          </div>
+        </div>
+      )}
 
-      {/* Primary file preview */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden flex-1">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-white flex-shrink-0">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-            {doc.fileUrl ? 'Primary Document' : 'No Primary File'}
+      {/* Attachments table card */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex-1 flex flex-col min-h-0">
+
+        {/* Table toolbar */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+          <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+            Attachments · {attachments.length}
           </span>
-          {doc.fileUrl && (
-            <div className="flex gap-1.5">
-              <a href={doc.fileUrl} download target="_blank" rel="noopener noreferrer"
-                className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-medium transition">⬇ Download</a>
-              <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-medium transition">🔗 Open</a>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {uploadingId === doc.id && (
+              <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium">
+                <span className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin block" />
+                Uploading…
+              </span>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+              className="hidden"
+              onChange={e => {
+                if (e.target.files && e.target.files.length > 0) {
+                  onUpload(doc.id, e.target.files)
+                }
+                e.target.value = ''
+              }}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={uploadingId === doc.id}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              + Attach file
+            </Button>
+          </div>
         </div>
 
-        {doc.fileUrl ? (
-          isImage ? (
-            <div className="p-4">
-              <img src={doc.fileUrl} alt={doc.title} className="w-full max-h-96 object-contain rounded-lg" />
-            </div>
-          ) : isPDF ? (
-            <iframe src={doc.fileUrl} title={doc.title} className="w-full border-0" style={{ height: '420px' }} />
-          ) : (
-            <div className="flex flex-col items-center justify-center py-14 text-center">
-              <div className="w-14 h-14 bg-slate-200 rounded-xl flex items-center justify-center text-2xl mb-3">{typeIcon}</div>
-              <p className="text-sm font-semibold text-slate-600 mb-1">{doc.title}</p>
-              <p className="text-xs text-slate-400 mb-4">{doc.type} · {doc.size}</p>
-              <a href={doc.fileUrl} download
-                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition">
-                ⬇ Download to view
-              </a>
-            </div>
-          )
+        {/* Empty state */}
+        {attachments.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center py-14 px-6">
+            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-2xl mb-3">📂</div>
+            <p className="text-sm font-semibold text-slate-600 mb-1">No attachments yet</p>
+            <p className="text-xs text-slate-400 mb-4 max-w-xs">
+              Click <strong>+ Attach file</strong> above to upload supporting documents to this record.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              + Attach file
+            </Button>
+          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-14 text-center">
-            <div className="w-14 h-14 bg-slate-200 rounded-xl flex items-center justify-center text-2xl mb-3">{typeIcon}</div>
-            <p className="text-sm text-slate-400">No primary file uploaded.</p>
-            <p className="text-xs text-slate-300 mt-1">Click ▸ next to the document in the hierarchy to expand and view attachments.</p>
+          /* Attachments table */
+          <div className="flex-1 overflow-y-auto min-h-0">
+            <table className="w-full border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400">File name</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[80px]">Type</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">Size</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[130px]">Uploaded</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">By</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[100px]">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attachments.map(att => {
+                  const fi = fileInfo(att.file_name)
+                  return (
+                    <tr
+                      key={att.id}
+                      className="border-b border-slate-100 hover:bg-blue-50 cursor-pointer transition-colors group"
+                      onClick={() => onSelectAttachment(doc, att)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-base flex-shrink-0 leading-none">{fi.icon}</span>
+                          <span className="text-sm font-semibold text-slate-800 truncate max-w-[280px]">
+                            {att.file_name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${fi.badgeCls}`}>
+                          {fi.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{att.file_size}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {new Date(att.uploaded_at).toLocaleDateString('en-PH', {
+                          year: 'numeric', month: 'short', day: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{att.uploaded_by}</td>
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
+                            <Button variant="ghost" size="sm" title="Download">⬇</Button>
+                          </a>
+                          <a href={att.file_url} target="_blank" rel="noopener noreferrer">
+                            <Button variant="ghost" size="sm" title="Open in tab">🔗</Button>
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -311,12 +409,13 @@ function DocDetailPanel({ doc, onForward, onEdit, onArchive, attachmentCount }: 
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Right panel — Attachment viewer
+// Right panel — Attachment detail viewer (drill-down from table row click)
 // ══════════════════════════════════════════════════════════════════════════
-function AttachmentDetailPanel({ doc, attachment, onRemove }: {
+function AttachmentDetailPanel({ doc, attachment, onRemove, onBack }: {
   doc: DocWithUrl
   attachment: DocAttachment
   onRemove: (id: string) => void
+  onBack: () => void
 }) {
   const { toast }      = useToast()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -333,12 +432,18 @@ function AttachmentDetailPanel({ doc, attachment, onRemove }: {
 
   return (
     <div className="animate-fade-up h-full flex flex-col">
-      {/* Back-reference breadcrumb */}
-      <div className="flex items-center gap-1.5 mb-3 text-xs text-slate-400 flex-wrap">
-        <span>📁</span>
-        <span className="text-slate-500 font-medium truncate max-w-[200px]">{doc.title}</span>
-        <span className="text-slate-300">→</span>
-        <span className={`font-semibold ${fi.color}`}>Attachment</span>
+      {/* Back button + breadcrumb */}
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg"
+        >
+          ← Back to attachments
+        </button>
+        <span className="text-xs text-slate-300">/</span>
+        <span className="text-xs text-slate-500 font-medium truncate max-w-[200px]">{doc.title}</span>
+        <span className="text-xs text-slate-300">/</span>
+        <span className={`text-xs font-semibold ${fi.color} truncate max-w-[160px]`}>{attachment.file_name}</span>
       </div>
 
       {/* File header */}
@@ -421,14 +526,13 @@ function AttachmentDetailPanel({ doc, attachment, onRemove }: {
 // Left-panel tree node — one document + its expandable attachments
 // ══════════════════════════════════════════════════════════════════════════
 function DocTreeNode({
-  doc, depth, selection, onSelectDoc, onSelectAttachment,
+  doc, depth, selection, onSelectDoc,
   attachmentsMap, expandedDocs, toggleExpand, onUpload, uploadingId,
 }: {
   doc: DocWithUrl
   depth: number
   selection: Selection | null
   onSelectDoc: (doc: DocWithUrl) => void
-  onSelectAttachment: (doc: DocWithUrl, att: DocAttachment) => void
   attachmentsMap: Map<string, DocAttachment[]>
   expandedDocs: Set<string>
   toggleExpand: (id: string) => void
@@ -450,16 +554,17 @@ function DocTreeNode({
 
   return (
     <div>
-      {/* ── Document row ── */}
+      {/* Document row */}
       <div
         style={{ marginLeft: indentPx, width: rowWidth }}
-        className={`group flex items-center gap-1.5 pr-1.5 pl-2.5 py-2 rounded-lg mb-0.5 transition ${
+        className={`group flex items-center gap-1.5 pr-1.5 pl-2.5 py-2 rounded-lg mb-0.5 transition cursor-pointer ${
           isDocActive
             ? 'bg-blue-50 text-blue-700'
             : hasAttActive
             ? 'bg-blue-50/40 text-slate-700'
             : 'text-slate-700 hover:bg-slate-100'
         }`}
+        onClick={() => onSelectDoc(doc)}
       >
         {/* Expand/collapse toggle */}
         <button
@@ -476,17 +581,14 @@ function DocTreeNode({
         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: levelColor }} />
 
         {/* Document title */}
-        <span
-          className={`flex-1 truncate text-[13px] cursor-pointer ${isDocActive ? 'font-semibold' : 'font-medium'}`}
-          onClick={() => onSelectDoc(doc)}
-        >
+        <span className={`flex-1 truncate text-[13px] ${isDocActive ? 'font-semibold' : 'font-medium'}`}>
           {doc.title}
         </span>
 
         {/* Attachment count badge */}
         {attachments.length > 0 && (
           <span
-            onClick={() => { toggleExpand(doc.id); onSelectDoc(doc) }}
+            onClick={e => { e.stopPropagation(); toggleExpand(doc.id) }}
             className={`flex-shrink-0 cursor-pointer text-[10px] font-bold px-1.5 py-0.5 rounded-full transition leading-none ${
               isDocActive || hasAttActive
                 ? 'bg-blue-200 text-blue-800'
@@ -531,7 +633,7 @@ function DocTreeNode({
         }}
       />
 
-      {/* ── Attachment sub-rows ── */}
+      {/* Attachment sub-rows */}
       {isExpanded && (
         <div>
           {attachments.length === 0 ? (
@@ -553,7 +655,12 @@ function DocTreeNode({
               return (
                 <button
                   key={att.id}
-                  onClick={() => onSelectAttachment(doc, att)}
+                  onClick={() => {
+                    // Clicking a tree attachment row goes straight to detail view
+                    // We use a custom event here; parent handles via onSelectAttachment
+                    const event = new CustomEvent('select-attachment', { detail: { doc, att } })
+                    window.dispatchEvent(event)
+                  }}
                   style={{ marginLeft: attIndent, width: attWidth }}
                   className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] mb-0.5 w-full text-left transition ${
                     isActive
@@ -561,19 +668,14 @@ function DocTreeNode({
                       : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
-                  {/* Tree connector glyph */}
                   <span className="flex-shrink-0 text-slate-300 text-[11px] font-mono leading-none select-none">
                     {isLast ? '└' : '├'}
                   </span>
-                  {/* File type icon */}
                   <span className="flex-shrink-0 text-base leading-none">{fi.icon}</span>
-                  {/* File name */}
                   <span className="truncate flex-1">{att.file_name}</span>
-                  {/* Type badge */}
                   <span className={`flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${fi.bg} ${fi.color} ${fi.border}`}>
                     {fi.label}
                   </span>
-                  {/* Size */}
                   <span className="flex-shrink-0 text-[10px] text-slate-400 hidden xl:block">{att.file_size}</span>
                 </button>
               )
@@ -606,6 +708,16 @@ export default function MasterPage() {
   const editModal    = useModal()
   const archiveDisc  = useDisclosure<string>()
 
+  // Listen for attachment selections from tree nodes
+  useEffect(() => {
+    function handler(e: Event) {
+      const { doc, att } = (e as CustomEvent).detail
+      setSelection({ kind: 'attachment', doc, attachment: att })
+    }
+    window.addEventListener('select-attachment', handler)
+    return () => window.removeEventListener('select-attachment', handler)
+  }, [])
+
   // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadAll() {
@@ -619,7 +731,6 @@ export default function MasterPage() {
       const activeDocs = docs.filter((d: DocWithUrl) => !archivedIds.has(d.id))
       setDocuments(activeDocs)
 
-      // Pre-load all attachments in one query
       const allIds = activeDocs.map((d: DocWithUrl) => d.id)
       if (allIds.length > 0) {
         const { data: allAtts } = await supabase
@@ -693,7 +804,6 @@ export default function MasterPage() {
   }
 
   function handleAttachmentRemoved(removedId: string) {
-    // Remove from map
     setAttachmentsMap(prev => {
       const next = new Map(prev)
       for (const [docId, list] of next) {
@@ -702,7 +812,7 @@ export default function MasterPage() {
       }
       return next
     })
-    // Fall back to parent doc if the removed attachment was selected
+    // Go back to parent doc view after removing
     if (selection?.kind === 'attachment' && selection.attachment.id === removedId) {
       setSelection({ kind: 'doc', doc: selection.doc })
     }
@@ -744,7 +854,6 @@ export default function MasterPage() {
            (levelFilter === 'ALL' || doc.level === levelFilter)
   }), [allFlat, query, levelFilter])
 
-  // Current doc for modals (works for both selection kinds)
   const activeDoc = selection ? selection.doc : null
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -796,7 +905,7 @@ export default function MasterPage() {
                   Document Hierarchy · {filtered.length}
                 </p>
                 <p className="text-[10px] text-slate-400 mt-1">
-                  ▸ expand · 📎 attachments · + add file
+                  Click doc → view attachments table · ▸ expand inline
                 </p>
               </div>
 
@@ -816,7 +925,6 @@ export default function MasterPage() {
                       depth={depth}
                       selection={selection}
                       onSelectDoc={doc => setSelection({ kind: 'doc', doc })}
-                      onSelectAttachment={(doc, att) => setSelection({ kind: 'attachment', doc, attachment: att })}
                       attachmentsMap={attachmentsMap}
                       expandedDocs={expandedDocs}
                       toggleExpand={toggleExpand}
@@ -842,30 +950,36 @@ export default function MasterPage() {
               </div>
             </div>
 
-            {/* ── Right panel: detail / attachment viewer ────────────── */}
+            {/* ── Right panel ────────────────────────────────────────── */}
             <div className="flex-1 overflow-y-auto p-7">
               {!selection ? (
                 <div className="h-full flex items-center justify-center">
                   <EmptyState
                     icon="📄"
                     title="Nothing selected"
-                    description="Select a document or attachment from the hierarchy on the left."
+                    description="Select a document from the hierarchy on the left to view its attachments."
                     action={<Button variant="primary" size="sm" onClick={uploadModal.open}>+ Upload Document</Button>}
                   />
                 </div>
               ) : selection.kind === 'doc' ? (
-                <DocDetailPanel
+                /* Clicking a doc → show attachments table */
+                <AttachmentsTablePanel
                   doc={selection.doc}
+                  attachments={attachmentsMap.get(selection.doc.id) ?? []}
+                  onSelectAttachment={(doc, att) => setSelection({ kind: 'attachment', doc, attachment: att })}
+                  onUpload={handleUpload}
+                  uploadingId={uploadingId}
                   onForward={forwardModal.open}
                   onEdit={editModal.open}
                   onArchive={() => archiveDisc.open(selection.doc.title)}
-                  attachmentCount={attachmentsMap.get(selection.doc.id)?.length ?? 0}
                 />
               ) : (
+                /* Clicking a table row → drill into single file preview */
                 <AttachmentDetailPanel
                   doc={selection.doc}
                   attachment={selection.attachment}
                   onRemove={handleAttachmentRemoved}
+                  onBack={() => setSelection({ kind: 'doc', doc: selection.doc })}
                 />
               )}
             </div>
