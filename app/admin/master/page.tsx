@@ -37,47 +37,92 @@ export interface DocAttachment {
   file_type: string
   uploaded_at: string
   uploaded_by: string
-  archived?: boolean
+  archived: boolean   // always a real boolean — never undefined / null
 }
 
-type Selection =
-  | { kind: 'doc';        doc: DocWithUrl }
-  | { kind: 'attachment'; doc: DocWithUrl; attachment: DocAttachment }
+type Selection = { kind: 'doc'; doc: DocWithUrl }
 
 // ── Supabase helpers ───────────────────────────────────────────────────────
-async function addAttachment(att: Omit<DocAttachment, 'uploaded_at'>): Promise<DocAttachment | null> {
-  const { data, error } = await supabase
-    .from('master_document_attachments')
-    .insert({ ...att, uploaded_at: new Date().toISOString() })
-    .select()
-    .single()
-  if (error) { console.warn('add attachment error:', error.message); return null }
-  return data
+
+/** Normalise a raw Supabase row so `archived` is always a proper boolean. */
+function normaliseAttachment(row: any): DocAttachment {
+  return {
+    id:          row.id,
+    document_id: row.document_id,
+    file_name:   row.file_name,
+    file_url:    row.file_url,
+    file_size:   row.file_size,
+    file_type:   row.file_type,
+    uploaded_at: row.uploaded_at,
+    uploaded_by: row.uploaded_by,
+    archived:    row.archived === true,   // null / undefined / false → false
+  }
 }
 
-async function archiveAttachment(id: string): Promise<void> {
-  const { error } = await supabase
+async function dbAddAttachment(
+  att: Omit<DocAttachment, 'uploaded_at'>
+): Promise<DocAttachment | null> {
+  const { data, error } = await supabase
+    .from('master_document_attachments')
+    .insert({ ...att, archived: false, uploaded_at: new Date().toISOString() })
+    .select()
+    .single()
+  if (error) {
+    console.error('addAttachment error:', error.message)
+    return null
+  }
+  return normaliseAttachment(data)
+}
+
+/**
+ * Set archived = true in DB.
+ * Returns true only when Supabase confirms the value persisted.
+ */
+async function dbArchiveAttachment(id: string): Promise<boolean> {
+  const { data, error } = await supabase
     .from('master_document_attachments')
     .update({ archived: true })
     .eq('id', id)
-  if (error) console.warn('archive attachment error:', error.message)
+    .select('id, archived')
+    .single()
+
+  if (error) {
+    console.error('archiveAttachment DB error:', error.message)
+    return false
+  }
+  return data?.archived === true
 }
 
-async function restoreAttachment(id: string): Promise<void> {
-  const { error } = await supabase
+/**
+ * Set archived = false in DB.
+ * Returns true only when Supabase confirms the value persisted.
+ */
+async function dbRestoreAttachment(id: string): Promise<boolean> {
+  const { data, error } = await supabase
     .from('master_document_attachments')
     .update({ archived: false })
     .eq('id', id)
-  if (error) console.warn('restore attachment error:', error.message)
+    .select('id, archived')
+    .single()
+
+  if (error) {
+    console.error('restoreAttachment DB error:', error.message)
+    return false
+  }
+  return data?.archived === false
 }
 
 // ── File-type helpers ──────────────────────────────────────────────────────
 function fileInfo(name: string) {
-  if (name.match(/\.pdf$/i))                return { icon: '📕', label: 'PDF',  color: 'text-red-600',    bg: 'bg-red-50',    border: 'border-red-200',    badgeCls: 'bg-red-100 text-red-700'      }
-  if (name.match(/\.docx?$/i))              return { icon: '📘', label: 'DOCX', color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200',   badgeCls: 'bg-blue-100 text-blue-700'    }
-  if (name.match(/\.xlsx?$/i))              return { icon: '📗', label: 'XLSX', color: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badgeCls: 'bg-green-100 text-green-700'  }
-  if (name.match(/\.(jpg|jpeg|png|webp)$/i)) return { icon: '🖼️', label: 'IMG', color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200', badgeCls: 'bg-violet-100 text-violet-700' }
-  return { icon: '📄', label: 'FILE', color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-200', badgeCls: 'bg-slate-100 text-slate-600' }
+  if (name.match(/\.pdf$/i))
+    return { icon: '📕', label: 'PDF',  color: 'text-red-600',    bg: 'bg-red-50',    border: 'border-red-200',    badgeCls: 'bg-red-100 text-red-700'      }
+  if (name.match(/\.docx?$/i))
+    return { icon: '📘', label: 'DOCX', color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200',   badgeCls: 'bg-blue-100 text-blue-700'    }
+  if (name.match(/\.xlsx?$/i))
+    return { icon: '📗', label: 'XLSX', color: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badgeCls: 'bg-green-100 text-green-700'  }
+  if (name.match(/\.(jpg|jpeg|png|webp)$/i))
+    return { icon: '🖼️', label: 'IMG',  color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200', badgeCls: 'bg-violet-100 text-violet-700' }
+  return   { icon: '📄', label: 'FILE', color: 'text-slate-600',  bg: 'bg-slate-50',  border: 'border-slate-200',  badgeCls: 'bg-slate-100 text-slate-600'  }
 }
 
 // ── Flatten doc tree ───────────────────────────────────────────────────────
@@ -92,66 +137,47 @@ function flattenDocs(docs: DocWithUrl[], depth = 0): FlatNode[] {
 // ══════════════════════════════════════════════════════════════════════════
 // Inline File Viewer Modal
 // ══════════════════════════════════════════════════════════════════════════
-function InlineFileViewerModal({ fileUrl, fileName, open, onClose }: {
-  fileUrl: string
-  fileName: string
-  open: boolean
-  onClose: () => void
+function InlineFileViewerModal({
+  fileUrl, fileName, open, onClose,
+}: {
+  fileUrl: string; fileName: string; open: boolean; onClose: () => void
 }) {
   const isPDF   = !!fileUrl.match(/\.pdf(\?|$)/i)
   const isImage = !!fileUrl.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)
-  const fi = fileInfo(fileName)
+  const fi      = fileInfo(fileName)
 
   return (
     <Modal open={open} onClose={onClose} title={`Viewing: ${fileName}`} width="max-w-5xl">
       <div className="flex flex-col" style={{ maxHeight: '85vh' }}>
-        {/* Toolbar */}
         <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-lg flex-shrink-0">{fi.icon}</span>
             <p className="text-xs font-semibold text-slate-700 truncate max-w-sm">{fileName}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-            <a
-              href={fileUrl}
-              download
-              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1"
-            >
+            <a href={fileUrl} download
+              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
               ⬇ Download
             </a>
             <Button variant="outline" size="sm" onClick={onClose}>✕ Close</Button>
           </div>
         </div>
 
-        {/* Viewer */}
         <div className="flex-1 overflow-auto bg-slate-100 min-h-0" style={{ minHeight: 400 }}>
           {isPDF ? (
-            <iframe
-              src={fileUrl}
-              title={fileName}
-              className="w-full border-0"
-              style={{ height: '75vh', minHeight: 400 }}
-            />
+            <iframe src={fileUrl} title={fileName} className="w-full border-0" style={{ height: '75vh', minHeight: 400 }} />
           ) : isImage ? (
             <div className="flex items-center justify-center p-6 min-h-96">
-              <img
-                src={fileUrl}
-                alt={fileName}
-                className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white"
-              />
+              <img src={fileUrl} alt={fileName}
+                className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md border border-slate-200 bg-white" />
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
               <span className="text-6xl mb-4">{fi.icon}</span>
               <p className="text-sm font-semibold text-slate-700 mb-1 break-all">{fileName}</p>
-              <p className="text-xs text-slate-400 mb-5 max-w-xs">
-                Preview not available for this file type. Download to view.
-              </p>
-              <a
-                href={fileUrl}
-                download
-                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition"
-              >
+              <p className="text-xs text-slate-400 mb-5 max-w-xs">Preview not available. Download to view the file.</p>
+              <a href={fileUrl} download
+                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition">
                 ⬇ Download to view
               </a>
             </div>
@@ -185,7 +211,9 @@ function ForwardModal({ doc, open, onClose }: { doc: DocWithUrl | null; open: bo
           <p className="text-sm font-semibold text-slate-800">{doc?.title}</p>
         </div>
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Forward To <span className="text-red-500">*</span></label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+            Forward To <span className="text-red-500">*</span>
+          </label>
           <select className={cls} value={recipient} onChange={e => setRecipient(e.target.value)}>
             <option value="">Select recipient…</option>
             <option>P/Col. Ramon Dela Cruz — Provincial Director</option>
@@ -239,7 +267,9 @@ function EditModal({ doc, open, onClose, onSave }: {
     <Modal open={open} onClose={onClose} title="Edit Document" width="max-w-lg">
       <div className="p-6 space-y-4">
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Document Title <span className="text-red-500">*</span></label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+            Document Title <span className="text-red-500">*</span>
+          </label>
           <input className={cls} value={title} onChange={e => setTitle(e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -295,7 +325,7 @@ function AttachmentsTablePanel({
   uploadingId,
   onForward,
   onEdit,
-  onArchive,
+  onArchiveDoc,
   onViewFile,
   onArchiveAttachment,
   onRestoreAttachment,
@@ -306,7 +336,7 @@ function AttachmentsTablePanel({
   uploadingId: string | null
   onForward: () => void
   onEdit: () => void
-  onArchive: () => void
+  onArchiveDoc: () => void
   onViewFile: (fileUrl: string, fileName: string) => void
   onArchiveAttachment: (att: DocAttachment) => void
   onRestoreAttachment: (att: DocAttachment) => void
@@ -315,8 +345,8 @@ function AttachmentsTablePanel({
   const [showArchived, setShowArchived] = useState(false)
 
   const activeAttachments   = attachments.filter(a => !a.archived)
-  const archivedAttachments = attachments.filter(a => a.archived)
-  const displayedAttachments = showArchived ? archivedAttachments : activeAttachments
+  const archivedAttachments = attachments.filter(a =>  a.archived)
+  const displayed           = showArchived ? archivedAttachments : activeAttachments
 
   const pathLabel =
     doc.level === 'STATION'    ? 'Regional → Provincial → Station' :
@@ -339,7 +369,7 @@ function AttachmentsTablePanel({
         ))}
       </div>
 
-      {/* Title + meta + actions row */}
+      {/* Title + actions */}
       <div className="flex items-start justify-between mb-5 gap-4">
         <div className="min-w-0">
           <h2 className="text-xl font-extrabold text-slate-800 leading-tight truncate">{doc.title}</h2>
@@ -353,11 +383,11 @@ function AttachmentsTablePanel({
         <div className="flex gap-2 flex-shrink-0">
           <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
           <Button variant="outline" size="sm" onClick={onEdit}>✏️ Edit</Button>
-          <Button variant="danger"  size="sm" onClick={onArchive}>🗄️ Archive</Button>
+          <Button variant="danger"  size="sm" onClick={onArchiveDoc}>🗄️ Archive</Button>
         </div>
       </div>
 
-      {/* Primary file quick-access */}
+      {/* Primary file */}
       {doc.fileUrl && (
         <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
           <span className="text-lg flex-shrink-0">{typeIcon}</span>
@@ -380,22 +410,18 @@ function AttachmentsTablePanel({
         </div>
       )}
 
-      {/* Attachments table card */}
+      {/* Attachments card */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex-1 flex flex-col min-h-0">
 
-        {/* Table toolbar */}
+        {/* Toolbar */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
-              Attachments
-            </span>
-            <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Attachments</span>
+            <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowArchived(false)}
                 className={`text-[11px] font-semibold px-2.5 py-1 rounded-full transition ${
-                  !showArchived
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  !showArchived ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >
                 Active · {activeAttachments.length}
@@ -403,15 +429,14 @@ function AttachmentsTablePanel({
               <button
                 onClick={() => setShowArchived(true)}
                 className={`text-[11px] font-semibold px-2.5 py-1 rounded-full transition ${
-                  showArchived
-                    ? 'bg-amber-500 text-white'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  showArchived ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >
                 Archived · {archivedAttachments.length}
               </button>
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             {uploadingId === doc.id && (
               <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium">
@@ -426,27 +451,21 @@ function AttachmentsTablePanel({
               accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
               className="hidden"
               onChange={e => {
-                if (e.target.files && e.target.files.length > 0) {
-                  onUpload(doc.id, e.target.files)
-                }
+                if (e.target.files && e.target.files.length > 0) onUpload(doc.id, e.target.files)
                 e.target.value = ''
               }}
             />
             {!showArchived && (
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={uploadingId === doc.id}
-                onClick={() => fileInputRef.current?.click()}
-              >
+              <Button variant="primary" size="sm" disabled={uploadingId === doc.id}
+                onClick={() => fileInputRef.current?.click()}>
                 + Attach file
               </Button>
             )}
           </div>
         </div>
 
-        {/* Empty state */}
-        {displayedAttachments.length === 0 ? (
+        {/* Body */}
+        {displayed.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-14 px-6">
             <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-2xl mb-3">
               {showArchived ? '🗄️' : '📂'}
@@ -475,15 +494,14 @@ function AttachmentsTablePanel({
                   <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">Size</th>
                   <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[130px]">Uploaded</th>
                   <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">By</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[120px]">Actions</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[140px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {displayedAttachments.map(att => {
+                {displayed.map(att => {
                   const fi = fileInfo(att.file_name)
                   return (
-                    <tr
-                      key={att.id}
+                    <tr key={att.id}
                       className={`border-b border-slate-100 transition-colors group ${
                         att.archived ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-blue-50'
                       }`}
@@ -491,7 +509,9 @@ function AttachmentsTablePanel({
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <span className="text-base flex-shrink-0 leading-none">{fi.icon}</span>
-                          <span className={`text-sm font-semibold truncate max-w-[280px] ${att.archived ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                          <span className={`text-sm font-semibold truncate max-w-[280px] ${
+                            att.archived ? 'text-slate-400 line-through' : 'text-slate-800'
+                          }`}>
                             {att.file_name}
                           </span>
                         </div>
@@ -510,33 +530,29 @@ function AttachmentsTablePanel({
                       <td className="px-4 py-3 text-xs text-slate-500">{att.uploaded_by}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {!att.archived && (
+                          {!att.archived ? (
                             <>
                               <button
                                 onClick={() => onViewFile(att.file_url, att.file_name)}
-                                title="View"
                                 className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition"
                               >
                                 👁 View
                               </button>
                               <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
-                                <button title="Download" className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
+                                <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
                                   ⬇
                                 </button>
                               </a>
                               <button
                                 onClick={() => onArchiveAttachment(att)}
-                                title="Archive"
                                 className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition"
                               >
-                                🗄️
+                                🗄️ Archive
                               </button>
                             </>
-                          )}
-                          {att.archived && (
+                          ) : (
                             <button
                               onClick={() => onRestoreAttachment(att)}
-                              title="Restore"
                               className="text-[10px] font-semibold px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition"
                             >
                               ↩ Restore
@@ -557,15 +573,10 @@ function AttachmentsTablePanel({
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Left-panel tree node — simplified (no expand/collapse)
+// Left-panel tree node (no expand/collapse — click = view attachments)
 // ══════════════════════════════════════════════════════════════════════════
 function DocTreeNode({
-  doc,
-  depth,
-  isSelected,
-  onSelectDoc,
-  attachmentsMap,
-  uploadingId,
+  doc, depth, isSelected, onSelectDoc, attachmentsMap, uploadingId,
 }: {
   doc: DocWithUrl
   depth: number
@@ -574,56 +585,39 @@ function DocTreeNode({
   attachmentsMap: Map<string, DocAttachment[]>
   uploadingId: string | null
 }) {
-  const attachments = (attachmentsMap.get(doc.id) ?? []).filter(a => !a.archived)
-
-  const levelColor =
+  const activeCount = (attachmentsMap.get(doc.id) ?? []).filter(a => !a.archived).length
+  const levelColor  =
     doc.level === 'REGIONAL'   ? '#3b63b8' :
     doc.level === 'PROVINCIAL' ? '#f59e0b' : '#10b981'
 
   const indentPx = depth * 16 + 8
-  const rowWidth = `calc(100% - ${indentPx + 8}px)`
+  const rowWidth  = `calc(100% - ${indentPx + 8}px)`
 
   return (
-    <div>
-      <div
-        style={{ marginLeft: indentPx, width: rowWidth }}
-        className={`group flex items-center gap-1.5 pr-2 pl-2.5 py-2.5 rounded-lg mb-0.5 transition cursor-pointer ${
-          isSelected
-            ? 'bg-blue-600 text-white shadow-sm'
-            : 'text-slate-700 hover:bg-slate-100'
-        }`}
-        onClick={() => onSelectDoc(doc)}
-      >
-        {/* Level indicator dot */}
-        <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 transition-opacity ${isSelected ? 'opacity-70' : ''}`}
-          style={{ background: levelColor }}
-        />
+    <div
+      style={{ marginLeft: indentPx, width: rowWidth }}
+      className={`flex items-center gap-1.5 pr-2 pl-2.5 py-2.5 rounded-lg mb-0.5 cursor-pointer transition ${
+        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'
+      }`}
+      onClick={() => onSelectDoc(doc)}
+    >
+      <span
+        className={`w-2 h-2 rounded-full flex-shrink-0 ${isSelected ? 'opacity-70' : ''}`}
+        style={{ background: levelColor }}
+      />
+      <span className="flex-1 truncate text-[13px] font-medium">{doc.title}</span>
 
-        {/* Document title */}
-        <span className={`flex-1 truncate text-[13px] font-medium`}>
-          {doc.title}
+      {activeCount > 0 && (
+        <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
+          isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
+        }`}>
+          📎{activeCount}
         </span>
+      )}
 
-        {/* Attachment count badge */}
-        {attachments.length > 0 && (
-          <span
-            className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
-              isSelected
-                ? 'bg-white/20 text-white'
-                : 'bg-slate-200 text-slate-500'
-            }`}
-            title={`${attachments.length} attachment${attachments.length !== 1 ? 's' : ''}`}
-          >
-            📎{attachments.length}
-          </span>
-        )}
-
-        {/* Uploading indicator */}
-        {uploadingId === doc.id && (
-          <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin block flex-shrink-0 opacity-70" />
-        )}
-      </div>
+      {uploadingId === doc.id && (
+        <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin block flex-shrink-0 opacity-70" />
+      )}
     </div>
   )
 }
@@ -641,54 +635,64 @@ export default function MasterPage() {
   const [attachmentsMap, setAttachmentsMap] = useState<Map<string, DocAttachment[]>>(new Map())
   const [selection,      setSelection]      = useState<Selection | null>(null)
   const [uploadingId,    setUploadingId]    = useState<string | null>(null)
+  const [archivingAtt,   setArchivingAtt]   = useState(false)
 
-  // Inline file viewer state
   const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null)
 
-  // Archive attachment confirm
   const archiveAttDisc = useDisclosure<DocAttachment>()
-
-  const uploadModal  = useModal()
-  const forwardModal = useModal()
-  const editModal    = useModal()
-  const archiveDisc  = useDisclosure<string>()
+  const uploadModal    = useModal()
+  const forwardModal   = useModal()
+  const editModal      = useModal()
+  const archiveDisc    = useDisclosure<string>()
 
   // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadAll() {
-      const [docs, archived] = await Promise.all([getMasterDocuments(), getArchivedDocs()])
-      const archivedIds = new Set(
-        (archived ?? [])
-          .map((a: any) => String(a.id ?? ''))
-          .filter((id: string) => id.startsWith('arc-md-'))
-          .map((id: string) => id.replace('arc-md-', ''))
-      )
-      const activeDocs = docs.filter((d: DocWithUrl) => !archivedIds.has(d.id))
-      setDocuments(activeDocs)
+      try {
+        const [docs, archived] = await Promise.all([getMasterDocuments(), getArchivedDocs()])
 
-      const allIds = activeDocs.map((d: DocWithUrl) => d.id)
-      if (allIds.length > 0) {
-        const { data: allAtts } = await supabase
-          .from('master_document_attachments')
-          .select('*')
-          .in('document_id', allIds)
-          .order('uploaded_at', { ascending: true })
-        const map = new Map<string, DocAttachment[]>()
-        for (const att of (allAtts ?? [])) {
-          const list = map.get(att.document_id) ?? []
-          list.push(att)
-          map.set(att.document_id, list)
+        const archivedIds = new Set(
+          (archived ?? [])
+            .map((a: any) => String(a.id ?? ''))
+            .filter((id: string) => id.startsWith('arc-md-'))
+            .map((id: string) => id.replace('arc-md-', ''))
+        )
+        const activeDocs = docs.filter((d: DocWithUrl) => !archivedIds.has(d.id))
+        setDocuments(activeDocs)
+
+        const allIds = activeDocs.map((d: DocWithUrl) => d.id)
+        if (allIds.length > 0) {
+          const { data: allAtts, error } = await supabase
+            .from('master_document_attachments')
+            .select('*')
+            .in('document_id', allIds)
+            .order('uploaded_at', { ascending: true })
+
+          if (error) {
+            console.error('Failed to load attachments:', error.message)
+          } else {
+            const map = new Map<string, DocAttachment[]>()
+            for (const row of (allAtts ?? [])) {
+              const att  = normaliseAttachment(row)
+              const list = map.get(att.document_id) ?? []
+              list.push(att)
+              map.set(att.document_id, list)
+            }
+            setAttachmentsMap(map)
+          }
         }
-        setAttachmentsMap(map)
-      }
 
-      if (activeDocs.length > 0) setSelection({ kind: 'doc', doc: activeDocs[0] })
-      setLoading(false)
+        if (activeDocs.length > 0) setSelection({ kind: 'doc', doc: activeDocs[0] })
+      } catch (err) {
+        console.error('loadAll error:', err)
+      } finally {
+        setLoading(false)
+      }
     }
     loadAll()
   }, [])
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
+  // ── Upload ───────────────────────────────────────────────────────────────
   async function handleUpload(docId: string, files: FileList) {
     setUploadingId(docId)
     let count = 0
@@ -700,7 +704,7 @@ export default function MasterPage() {
       if (storageError) { toast.error(`Failed to upload "${file.name}".`); continue }
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
       const ext    = file.name.split('.').pop()?.toUpperCase() ?? 'FILE'
-      const newAtt = await addAttachment({
+      const newAtt = await dbAddAttachment({
         id:          `att-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         document_id: docId,
         file_name:   file.name,
@@ -725,6 +729,7 @@ export default function MasterPage() {
     setUploadingId(null)
   }
 
+  // ── Document CRUD ─────────────────────────────────────────────────────────
   async function handleAdd(newDoc: DocWithUrl) {
     await addMasterDocument(newDoc)
     setDocuments(prev => [...prev, newDoc])
@@ -735,14 +740,13 @@ export default function MasterPage() {
   async function handleSave(updated: DocWithUrl) {
     await updateMasterDocument(updated)
     setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d))
-    if (selection?.kind === 'doc' && selection.doc.id === updated.id)
-      setSelection({ kind: 'doc', doc: updated })
-    toast.success('Document updated successfully.')
+    if (selection?.doc.id === updated.id) setSelection({ kind: 'doc', doc: updated })
+    toast.success('Document updated.')
     editModal.close()
   }
 
-  async function handleArchive() {
-    if (!selection || selection.kind !== 'doc') return
+  async function handleArchiveDoc() {
+    if (!selection) return
     const doc  = selection.doc
     const date = new Date().toISOString().split('T')[0]
     await addArchivedDoc({ id: `arc-md-${doc.id}`, title: doc.title, type: 'Master Document', archivedDate: date, archivedBy: 'Admin' })
@@ -753,26 +757,48 @@ export default function MasterPage() {
     archiveDisc.close()
   }
 
+  // ── Archive attachment ────────────────────────────────────────────────────
+  // UI state is only updated AFTER the DB write is verified successful.
   async function handleArchiveAttachment() {
     const att = archiveAttDisc.payload
     if (!att) return
-    await archiveAttachment(att.id)
-    setAttachmentsMap(prev => {
-      const next = new Map(prev)
-      for (const [docId, list] of next) {
-        if (list.some(a => a.id === att.id)) {
-          next.set(docId, list.map(a => a.id === att.id ? { ...a, archived: true } : a))
-          break
-        }
+    setArchivingAtt(true)
+    try {
+      const ok = await dbArchiveAttachment(att.id)
+      if (!ok) {
+        toast.error(
+          'Could not archive attachment — the database update failed. ' +
+          'Make sure the `archived` column exists by running the SQL migration.'
+        )
+        return
       }
-      return next
-    })
-    toast.success(`"${att.file_name}" archived.`)
-    archiveAttDisc.close()
+      // DB confirmed ✓ — now safe to update local state
+      setAttachmentsMap(prev => {
+        const next = new Map(prev)
+        for (const [docId, list] of next) {
+          if (list.some(a => a.id === att.id)) {
+            next.set(docId, list.map(a => a.id === att.id ? { ...a, archived: true } : a))
+            break
+          }
+        }
+        return next
+      })
+      toast.success(`"${att.file_name}" archived.`)
+      archiveAttDisc.close()
+    } finally {
+      setArchivingAtt(false)
+    }
   }
 
+  // ── Restore attachment ────────────────────────────────────────────────────
+  // UI state is only updated AFTER the DB write is verified successful.
   async function handleRestoreAttachment(att: DocAttachment) {
-    await restoreAttachment(att.id)
+    const ok = await dbRestoreAttachment(att.id)
+    if (!ok) {
+      toast.error('Could not restore attachment — the database update failed.')
+      return
+    }
+    // DB confirmed ✓ — now safe to update local state
     setAttachmentsMap(prev => {
       const next = new Map(prev)
       for (const [docId, list] of next) {
@@ -786,7 +812,7 @@ export default function MasterPage() {
     toast.success(`"${att.file_name}" restored.`)
   }
 
-  // ── Filtered list ───────────────────────────────────────────────────────
+  // ── Filtered list ─────────────────────────────────────────────────────────
   const allFlat  = useMemo(() => flattenDocs(documents), [documents])
   const filtered = useMemo(() => allFlat.filter(({ doc }) => {
     const q = query.trim().toLowerCase()
@@ -794,16 +820,15 @@ export default function MasterPage() {
            (levelFilter === 'ALL' || doc.level === levelFilter)
   }), [allFlat, query, levelFilter])
 
-  const activeDoc = selection ? selection.doc : null
+  const activeDoc = selection?.doc ?? null
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
       <PageHeader title="Master Documents" />
 
       <div className="p-6 flex flex-col gap-5 flex-1" style={{ height: 'calc(100vh - 56px)' }}>
 
-        {/* Main card — full height */}
         <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
 
           {/* Toolbar */}
@@ -826,12 +851,8 @@ export default function MasterPage() {
           {/* Split view */}
           <div className="flex flex-1 min-h-0 overflow-hidden">
 
-            {/* ── Left panel: hierarchy ────────────────────────── */}
-            <div
-              className="flex-shrink-0 border-r border-slate-200 flex flex-col overflow-hidden"
-              style={{ width: 280 }}
-            >
-              {/* Panel header */}
+            {/* Left: document list */}
+            <div className="flex-shrink-0 border-r border-slate-200 flex flex-col overflow-hidden" style={{ width: 280 }}>
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex-shrink-0">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 leading-none">
                   Documents · {filtered.length}
@@ -839,7 +860,6 @@ export default function MasterPage() {
                 <p className="text-[10px] text-slate-400 mt-1">Click to view attachments</p>
               </div>
 
-              {/* Tree */}
               <div className="flex-1 overflow-y-auto py-2 px-2">
                 {loading ? (
                   <div className="flex items-center justify-center py-12">
@@ -853,10 +873,8 @@ export default function MasterPage() {
                       key={doc.id}
                       doc={doc}
                       depth={depth}
-                      isSelected={
-                        selection?.doc.id === doc.id
-                      }
-                      onSelectDoc={doc => setSelection({ kind: 'doc', doc })}
+                      isSelected={selection?.doc.id === doc.id}
+                      onSelectDoc={d => setSelection({ kind: 'doc', doc: d })}
                       attachmentsMap={attachmentsMap}
                       uploadingId={uploadingId}
                     />
@@ -864,7 +882,6 @@ export default function MasterPage() {
                 )}
               </div>
 
-              {/* Level legend */}
               <div className="px-4 py-3 border-t border-slate-100 space-y-1.5 flex-shrink-0">
                 {[
                   { color: '#3b63b8', label: 'Regional' },
@@ -879,7 +896,7 @@ export default function MasterPage() {
               </div>
             </div>
 
-            {/* ── Right panel ────────────────────────────────────────── */}
+            {/* Right: attachment detail */}
             <div className="flex-1 overflow-y-auto p-6">
               {!selection ? (
                 <div className="h-full flex items-center justify-center">
@@ -898,7 +915,7 @@ export default function MasterPage() {
                   uploadingId={uploadingId}
                   onForward={forwardModal.open}
                   onEdit={editModal.open}
-                  onArchive={() => archiveDisc.open(selection.doc.title)}
+                  onArchiveDoc={() => archiveDisc.open(selection.doc.title)}
                   onViewFile={(url, name) => setViewerFile({ url, name })}
                   onArchiveAttachment={att => archiveAttDisc.open(att)}
                   onRestoreAttachment={handleRestoreAttachment}
@@ -910,11 +927,10 @@ export default function MasterPage() {
       </div>
 
       {/* Modals */}
-      <AddDocumentModal open={uploadModal.isOpen} onClose={uploadModal.close} onAdd={handleAdd} />
-      <ForwardModal doc={activeDoc} open={forwardModal.isOpen} onClose={forwardModal.close} />
-      <EditModal    doc={activeDoc} open={editModal.isOpen}    onClose={editModal.close} onSave={handleSave} />
+      <AddDocumentModal open={uploadModal.isOpen}  onClose={uploadModal.close}  onAdd={handleAdd} />
+      <ForwardModal     doc={activeDoc}             open={forwardModal.isOpen}   onClose={forwardModal.close} />
+      <EditModal        doc={activeDoc}             open={editModal.isOpen}      onClose={editModal.close} onSave={handleSave} />
 
-      {/* Inline File Viewer */}
       {viewerFile && (
         <InlineFileViewerModal
           fileUrl={viewerFile.url}
@@ -924,23 +940,23 @@ export default function MasterPage() {
         />
       )}
 
-      {/* Archive document confirm */}
+      {/* Archive document */}
       <ConfirmDialog
         open={archiveDisc.isOpen}
         title="Archive Document"
         message={`Archive "${archiveDisc.payload}"? It will be moved to the Archive page and can be restored from there.`}
         confirmLabel="Archive"
         variant="danger"
-        onConfirm={handleArchive}
+        onConfirm={handleArchiveDoc}
         onCancel={archiveDisc.close}
       />
 
-      {/* Archive attachment confirm */}
+      {/* Archive attachment */}
       <ConfirmDialog
         open={archiveAttDisc.isOpen}
         title="Archive Attachment"
-        message={`Archive "${archiveAttDisc.payload?.file_name}"? It will be hidden from active view but can be restored later.`}
-        confirmLabel="Archive"
+        message={`Archive "${archiveAttDisc.payload?.file_name}"? It will be hidden from active view but can be restored at any time.`}
+        confirmLabel={archivingAtt ? 'Archiving…' : 'Archive'}
         variant="primary"
         onConfirm={handleArchiveAttachment}
         onCancel={archiveAttDisc.close}
