@@ -32,7 +32,7 @@ type DocWithUrl = MasterDocument & { fileUrl?: string }
 export interface DocAttachment {
   id: string
   document_id: string
-  parent_attachment_id: string | null   // NEW: enables recursive nesting
+  parent_attachment_id: string | null
   file_name: string
   file_url: string
   file_size: string
@@ -42,7 +42,6 @@ export interface DocAttachment {
   archived: boolean
 }
 
-// Navigation stack entry — either a root doc or a drill-down attachment
 type NavEntry =
   | { kind: 'doc';        doc: DocWithUrl }
   | { kind: 'attachment'; att: DocAttachment }
@@ -284,7 +283,7 @@ function EditModal({ doc, open, onClose, onSave }: {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Breadcrumb Component
+// IMPROVED Breadcrumb Component
 // ══════════════════════════════════════════════════════════════════════════
 function Breadcrumb({
   navStack,
@@ -296,24 +295,37 @@ function Breadcrumb({
   if (navStack.length <= 1) return null
 
   return (
-    <div className="flex items-center gap-1 flex-wrap px-1 py-2 mb-3">
+    <div className="flex items-center gap-0 flex-wrap mb-4 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl">
+      {/* Home icon for root */}
+      <span className="text-slate-400 mr-1 text-sm">🗂</span>
       {navStack.map((entry, i) => {
         const label = entry.kind === 'doc' ? entry.doc.title : entry.att.file_name
         const isLast = i === navStack.length - 1
+        const fi = entry.kind === 'attachment' ? fileInfo(entry.att.file_name) : null
+
         return (
-          <span key={i} className="flex items-center gap-1">
-            {i > 0 && <span className="text-slate-300 text-xs">›</span>}
+          <span key={i} className="flex items-center">
+            {i > 0 && (
+              <span className="mx-1.5 text-slate-400 font-bold text-sm select-none">›</span>
+            )}
             {isLast ? (
-              <span className="text-[11px] font-bold text-blue-600 truncate max-w-[160px]" title={label}>
-                {label.length > 22 ? label.slice(0, 21) + '…' : label}
-              </span>
-            ) : (
-              <button
-                onClick={() => onNavigateTo(i)}
-                className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline truncate max-w-[120px] transition"
+              /* Current location — bold and clearly highlighted */
+              <span
+                className="flex items-center gap-1 text-[13px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg"
                 title={label}
               >
-                {label.length > 18 ? label.slice(0, 17) + '…' : label}
+                {fi && <span className="text-sm">{fi.icon}</span>}
+                <span className="truncate max-w-[180px]">{label.length > 28 ? label.slice(0, 27) + '…' : label}</span>
+              </span>
+            ) : (
+              /* Ancestor — clearly clickable link */
+              <button
+                onClick={() => onNavigateTo(i)}
+                className="flex items-center gap-1 text-[13px] font-semibold text-slate-600 hover:text-blue-700 hover:bg-white border border-transparent hover:border-blue-200 px-2 py-1 rounded-lg transition-all"
+                title={`Go back to ${label}`}
+              >
+                {fi && <span className="text-sm">{fi.icon}</span>}
+                <span className="truncate max-w-[140px]">{label.length > 20 ? label.slice(0, 19) + '…' : label}</span>
               </button>
             )}
           </span>
@@ -324,7 +336,7 @@ function Breadcrumb({
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Attachments Table Panel (used for both root docs AND drill-down attachments)
+// IMPROVED Attachments Table Panel
 // ══════════════════════════════════════════════════════════════════════════
 function AttachmentsTablePanel({
   navStack,
@@ -345,7 +357,7 @@ function AttachmentsTablePanel({
   navStack: NavEntry[]
   currentEntry: NavEntry
   attachments: DocAttachment[]
-  allAttachments: Map<string, DocAttachment[]>  // keyed by attachment id for child lookups
+  allAttachments: Map<string, DocAttachment[]>
   onUpload: (parentDocId: string, parentAttId: string | null, files: FileList) => void
   uploadingId: string | null
   onForward: () => void
@@ -364,20 +376,16 @@ function AttachmentsTablePanel({
   const archivedAttachments = attachments.filter(a =>  a.archived)
   const displayed           = showArchived ? archivedAttachments : activeAttachments
 
-  // Determine current context label and metadata
   const isDrillDown = currentEntry.kind === 'attachment'
   const currentLabel = isDrillDown ? currentEntry.att.file_name : currentEntry.doc.title
 
-  // For drill-down: get the root doc id and current parent_attachment_id
   const rootDocId = navStack[0].kind === 'doc' ? navStack[0].doc.id : ''
   const parentAttId = isDrillDown ? currentEntry.att.id : null
 
-  // Count children for each attachment (active only)
   function childCount(attId: string): number {
     return (allAttachments.get(attId) ?? []).filter(a => !a.archived).length
   }
 
-  // File & metadata for drill-down header
   const drillAtt = isDrillDown ? currentEntry.att : null
   const drillFi = drillAtt ? fileInfo(drillAtt.file_name) : null
   const typeIcon =
@@ -390,21 +398,29 @@ function AttachmentsTablePanel({
   return (
     <div className="animate-fade-up h-full flex flex-col">
 
-      {/* Breadcrumb navigation */}
+      {/* ── IMPROVED Breadcrumb ── */}
       <Breadcrumb navStack={navStack} onNavigateTo={onNavigateTo} />
 
-      {/* Back button (shown when drilled down) */}
+      {/* ── IMPROVED Back Button ── */}
       {navStack.length > 1 && (
         <button
           onClick={() => onNavigateTo(navStack.length - 2)}
-          className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition mb-3 group"
+          className="inline-flex items-center gap-2 mb-4 px-4 py-2 bg-white border-2 border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md self-start"
         >
-          <span className="w-5 h-5 rounded-full bg-slate-100 group-hover:bg-blue-50 flex items-center justify-center text-[10px] transition">←</span>
-          Back to {navStack.length >= 2
-            ? (navStack[navStack.length - 2].kind === 'doc'
-                ? (navStack[navStack.length - 2] as { kind: 'doc'; doc: DocWithUrl }).doc.title
-                : (navStack[navStack.length - 2] as { kind: 'attachment'; att: DocAttachment }).att.file_name)
-            : 'Documents'}
+          {/* Left arrow icon */}
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+          </svg>
+          <span>
+            Back to{' '}
+            <span className="font-bold">
+              {navStack.length >= 2
+                ? (navStack[navStack.length - 2].kind === 'doc'
+                    ? (navStack[navStack.length - 2] as { kind: 'doc'; doc: DocWithUrl }).doc.title
+                    : (navStack[navStack.length - 2] as { kind: 'attachment'; att: DocAttachment }).att.file_name)
+                : 'Documents'}
+            </span>
+          </span>
         </button>
       )}
 
@@ -422,28 +438,27 @@ function AttachmentsTablePanel({
           </div>
           {isDrillDown && drillAtt && (
             <div className="flex items-center gap-2 flex-wrap mt-1">
-              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
                 {drillFi?.label}
               </span>
-              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
                 {drillAtt.file_size}
               </span>
-              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
                 📅 {new Date(drillAtt.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
               </span>
             </div>
           )}
           {!isDrillDown && (
             <div className="flex items-center gap-2 flex-wrap mt-1">
-              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">📅 {currentEntry.doc.date}</span>
-              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">{typeIcon} {currentEntry.doc.type} · {currentEntry.doc.size}</span>
+              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-medium">📅 {currentEntry.doc.date}</span>
+              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-medium">{typeIcon} {currentEntry.doc.type} · {currentEntry.doc.size}</span>
               <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{currentEntry.doc.tag}</Badge>
               <Badge className={levelBadgeClass(currentEntry.doc.level)}>{currentEntry.doc.level}</Badge>
             </div>
           )}
         </div>
 
-        {/* Action buttons — only for root doc level */}
         {!isDrillDown && (
           <div className="flex gap-2 flex-shrink-0">
             <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
@@ -452,7 +467,6 @@ function AttachmentsTablePanel({
           </div>
         )}
 
-        {/* For drill-down: view + download the file itself */}
         {isDrillDown && drillAtt && (
           <div className="flex gap-1.5 flex-shrink-0">
             <button
@@ -502,35 +516,52 @@ function AttachmentsTablePanel({
       {/* Attachments card */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex-1 flex flex-col min-h-0">
 
-        {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+        {/* ── IMPROVED Toolbar with Active/Archived Tabs ── */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
               {isDrillDown ? '📎 Child Attachments' : 'Attachments'}
             </span>
-            <div className="flex items-center gap-1">
+
+            {/* IMPROVED Toggle Buttons — look like real tabs */}
+            <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white shadow-sm">
               <button
                 onClick={() => setShowArchived(false)}
-                className={`text-[11px] font-semibold px-2.5 py-1 rounded-full transition ${
-                  !showArchived ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all ${
+                  !showArchived
+                    ? 'bg-blue-600 text-white shadow-inner'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-800'
                 }`}
               >
-                Active · {activeAttachments.length}
+                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
+                  !showArchived ? 'bg-white/30 text-white' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {activeAttachments.length}
+                </span>
+                Active
               </button>
+              <div className="w-px h-full bg-slate-300" />
               <button
                 onClick={() => setShowArchived(true)}
-                className={`text-[11px] font-semibold px-2.5 py-1 rounded-full transition ${
-                  showArchived ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all ${
+                  showArchived
+                    ? 'bg-amber-500 text-white shadow-inner'
+                    : 'bg-white text-slate-600 hover:bg-amber-50 hover:text-amber-700'
                 }`}
               >
-                Archived · {archivedAttachments.length}
+                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
+                  showArchived ? 'bg-white/30 text-white' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {archivedAttachments.length}
+                </span>
+                Archived
               </button>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {uploadingId && (
-              <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium">
+              <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
                 <span className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin block" />
                 Uploading…
               </span>
@@ -602,7 +633,6 @@ function AttachmentsTablePanel({
                         att.archived ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-blue-50/50'
                       }`}
                     >
-                      {/* File name — clickable to drill down */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <span className="text-base flex-shrink-0 leading-none">{fi.icon}</span>
@@ -635,7 +665,6 @@ function AttachmentsTablePanel({
                         {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{att.uploaded_by}</td>
-                      {/* Children count */}
                       <td className="px-4 py-3">
                         {!att.archived && children > 0 ? (
                           <button
@@ -648,7 +677,6 @@ function AttachmentsTablePanel({
                           <span className="text-xs text-slate-300">—</span>
                         )}
                       </td>
-                      {/* Actions */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {!att.archived ? (
@@ -753,14 +781,11 @@ export default function MasterPage() {
   const [query,          setQuery]          = useState('')
   const [levelFilter,    setLevel]          = useState<DocLevel | 'ALL'>('ALL')
   const [loading,        setLoading]        = useState(true)
-  // attachmentsMap: keyed by document_id for root-level, and by attachment id for nested
   const [attachmentsMap, setAttachmentsMap] = useState<Map<string, DocAttachment[]>>(new Map())
   const [selection,      setSelection]      = useState<Selection | null>(null)
   const [uploadingId,    setUploadingId]    = useState<string | null>(null)
   const [archivingAtt,   setArchivingAtt]   = useState(false)
 
-  // ── Navigation stack for drill-down ─────────────────────────────────────
-  // Each entry is either a root doc or an attachment we drilled into
   const [navStack, setNavStack] = useState<NavEntry[]>([])
 
   const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null)
@@ -771,22 +796,17 @@ export default function MasterPage() {
   const editModal      = useModal()
   const archiveDisc    = useDisclosure<string>()
 
-  // ── Current visible entry in the drill-down stack ─────────────────────
   const currentEntry: NavEntry | null = navStack.length > 0 ? navStack[navStack.length - 1] : null
 
-  // ── Get attachments for current nav entry ─────────────────────────────
   const currentAttachments = useMemo((): DocAttachment[] => {
     if (!currentEntry) return []
     if (currentEntry.kind === 'doc') {
-      // Root doc: show only top-level attachments (parent_attachment_id === null)
       return (attachmentsMap.get(currentEntry.doc.id) ?? []).filter(a => !a.parent_attachment_id)
     } else {
-      // Drilled into an attachment: show its children
       return attachmentsMap.get(currentEntry.att.id) ?? []
     }
   }, [currentEntry, attachmentsMap])
 
-  // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadAll() {
       try {
@@ -811,13 +831,9 @@ export default function MasterPage() {
           if (error) {
             console.error('Failed to load attachments:', error.message)
           } else {
-            // Build a multi-level map:
-            //   - by document_id → root-level attachments (parent_attachment_id null)
-            //   - by parent_attachment_id → child attachments
             const map = new Map<string, DocAttachment[]>()
             for (const row of (allAtts ?? [])) {
               const att = normaliseAttachment(row)
-              // Key: parent_attachment_id if nested, else document_id
               const key = att.parent_attachment_id ?? att.document_id
               const list = map.get(key) ?? []
               list.push(att)
@@ -841,23 +857,19 @@ export default function MasterPage() {
     loadAll()
   }, [])
 
-  // ── When user clicks a doc in the left panel ──────────────────────────
   function handleSelectDoc(doc: DocWithUrl) {
     setSelection({ kind: 'doc', doc })
     setNavStack([{ kind: 'doc', doc }])
   }
 
-  // ── Drill down into an attachment ─────────────────────────────────────
   function handleDrillDown(att: DocAttachment) {
     setNavStack(prev => [...prev, { kind: 'attachment', att }])
   }
 
-  // ── Navigate to a specific stack index ────────────────────────────────
   function handleNavigateTo(index: number) {
     setNavStack(prev => prev.slice(0, index + 1))
   }
 
-  // ── Upload (supports both root-doc attachments and nested child attachments)
   async function handleUpload(parentDocId: string, parentAttId: string | null, files: FileList) {
     setUploadingId(parentAttId ?? parentDocId)
     let count = 0
@@ -897,7 +909,6 @@ export default function MasterPage() {
     setUploadingId(null)
   }
 
-  // ── Document CRUD ─────────────────────────────────────────────────────
   async function handleAdd(newDoc: DocWithUrl) {
     await addMasterDocument(newDoc)
     setDocuments(prev => [...prev, newDoc])
@@ -930,7 +941,6 @@ export default function MasterPage() {
     archiveDisc.close()
   }
 
-  // ── Archive attachment (any level) ────────────────────────────────────
   async function handleArchiveAttachment() {
     const att = archiveAttDisc.payload
     if (!att) return
@@ -950,7 +960,6 @@ export default function MasterPage() {
       })
       toast.success(`"${att.file_name}" archived.`)
       archiveAttDisc.close()
-      // If we were viewing this attachment, pop back
       if (currentEntry?.kind === 'attachment' && currentEntry.att.id === att.id) {
         setNavStack(prev => prev.slice(0, -1))
       }
@@ -959,7 +968,6 @@ export default function MasterPage() {
     }
   }
 
-  // ── Restore attachment ────────────────────────────────────────────────
   async function handleRestoreAttachment(att: DocAttachment) {
     const ok = await dbRestoreAttachment(att.id)
     if (!ok) { toast.error('Could not restore attachment.'); return }
@@ -973,7 +981,6 @@ export default function MasterPage() {
     toast.success(`"${att.file_name}" restored.`)
   }
 
-  // ── Filtered list ─────────────────────────────────────────────────────
   const allFlat  = useMemo(() => flattenDocs(documents), [documents])
   const filtered = useMemo(() => allFlat.filter(({ doc }) => {
     const q = query.trim().toLowerCase()
@@ -983,7 +990,6 @@ export default function MasterPage() {
 
   const activeDocForModals = selection?.doc ?? null
 
-  // ── Render ────────────────────────────────────────────────────────────
   return (
     <>
       <PageHeader title="Master Documents" />
@@ -1109,7 +1115,6 @@ export default function MasterPage() {
         />
       )}
 
-      {/* Archive document */}
       <ConfirmDialog
         open={archiveDisc.isOpen}
         title="Archive Document"
@@ -1120,7 +1125,6 @@ export default function MasterPage() {
         onCancel={archiveDisc.close}
       />
 
-      {/* Archive attachment */}
       <ConfirmDialog
         open={archiveAttDisc.isOpen}
         title="Archive Attachment"
