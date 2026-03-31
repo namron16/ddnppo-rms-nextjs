@@ -147,7 +147,6 @@ export default function UserManagementPage() {
 
   // ── Highlight helpers ──────────────────────────────────────────────────────
   function flashRow(id: string, type: 'new' | 'updated') {
-    // Clear existing timeout for this id
     const existing = highlightTimeouts.current.get(id)
     if (existing) clearTimeout(existing)
 
@@ -198,10 +197,7 @@ export default function UserManagementPage() {
             return [newReq, ...prev]
           })
           flashRow(newReq.id, 'new')
-
-          // Increment unread badge if not on requests tab
           setUnreadCount(c => c + 1)
-
           toast.info(`New access request from ${newReq.full_name}`)
         }
       )
@@ -230,13 +226,11 @@ export default function UserManagementPage() {
 
     return () => {
       supabase.removeChannel(channel)
-      // Clear all flash timeouts
       highlightTimeouts.current.forEach(t => clearTimeout(t))
       highlightTimeouts.current.clear()
     }
   }, [loadRequests]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clear unread count when user switches to requests tab
   useEffect(() => {
     if (activeTab === 'requests') setUnreadCount(0)
   }, [activeTab])
@@ -245,51 +239,80 @@ export default function UserManagementPage() {
   async function handleApprove() {
     const req = approveDisc.payload
     if (!req) return
+
+    // Close dialog immediately for snappy UX
+    approveDisc.close()
     setApprovingId(req.id)
 
     try {
-      const { error } = await supabase
+      const now = new Date().toISOString()
+      const { data, error } = await supabase
         .from('access_requests')
-        .update({ status: 'APPROVED', reviewed_at: new Date().toISOString() })
+        .update({ status: 'APPROVED', reviewed_at: now })
         .eq('id', req.id)
+        .select()
+        .single()
 
-      if (error) throw error
+      if (error) {
+        console.error('Approve error:', error)
+        toast.error(`Failed to approve request: ${error.message}`)
+        return
+      }
 
+      if (!data) {
+        toast.error('Approve failed — no rows updated. Check RLS policies.')
+        return
+      }
+
+      // Update local state immediately (realtime will also fire)
       setRequests(prev => prev.map(r =>
-        r.id === req.id ? { ...r, status: 'APPROVED', reviewed_at: new Date().toISOString() } : r
+        r.id === req.id ? { ...r, status: 'APPROVED' as const, reviewed_at: now } : r
       ))
       flashRow(req.id, 'updated')
       toast.success(`Access approved for ${req.full_name}.`)
-    } catch {
+    } catch (err: any) {
+      console.error('Approve exception:', err)
       toast.error('Failed to approve request. Please try again.')
+    } finally {
+      setApprovingId(null)
     }
-
-    setApprovingId(null)
-    approveDisc.close()
   }
 
   // ── Reject ─────────────────────────────────────
   async function handleReject(id: string, reason: string) {
     try {
-      const { error } = await supabase
+      const now = new Date().toISOString()
+      const { data, error } = await supabase
         .from('access_requests')
         .update({
           status: 'REJECTED',
-          reviewed_at: new Date().toISOString(),
+          reviewed_at: now,
           rejection_reason: reason || null,
         })
         .eq('id', id)
+        .select()
+        .single()
 
-      if (error) throw error
+      if (error) {
+        console.error('Reject error:', error)
+        toast.error(`Failed to reject request: ${error.message}`)
+        return
+      }
+
+      if (!data) {
+        toast.error('Reject failed — no rows updated. Check RLS policies.')
+        return
+      }
 
       setRequests(prev => prev.map(r =>
         r.id === id
-          ? { ...r, status: 'REJECTED', reviewed_at: new Date().toISOString(), rejection_reason: reason || undefined }
+          ? { ...r, status: 'REJECTED' as const, reviewed_at: now, rejection_reason: reason || undefined }
           : r
       ))
       flashRow(id, 'updated')
       toast.success('Request rejected.')
-    } catch {
+    } catch (err: any) {
+      console.error('Reject exception:', err)
       toast.error('Failed to reject request. Please try again.')
     }
   }
@@ -333,7 +356,6 @@ export default function UserManagementPage() {
             }`}
           >
             📋 Approval Queue
-            {/* Combined pending + unread badge */}
             {(pendingCount > 0 || unreadCount > 0) && (
               <span className={`inline-flex items-center justify-center w-5 h-5 text-white text-[10px] font-bold rounded-full ${
                 unreadCount > 0 ? 'bg-red-500 animate-bounce' : 'bg-red-500'
@@ -343,7 +365,6 @@ export default function UserManagementPage() {
             )}
           </button>
 
-          {/* Realtime status */}
           <div className="ml-auto">
             <RealtimeBadge connected={realtimeConnected} requestCount={requests.length} />
           </div>
@@ -516,7 +537,6 @@ export default function UserManagementPage() {
                                   <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 flex-shrink-0">
                                     {req.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                                   </div>
-                                  {/* Live dot for new requests */}
                                   {isNew && (
                                     <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white animate-ping" />
                                   )}
@@ -607,6 +627,7 @@ export default function UserManagementPage() {
         onCancel={deleteDisc.close}
       />
 
+      {/* Approve confirm dialog */}
       <ConfirmDialog
         open={approveDisc.isOpen}
         title="Approve Access Request"
