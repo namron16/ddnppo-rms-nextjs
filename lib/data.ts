@@ -80,6 +80,134 @@ export async function addSpecialOrder(so: SpecialOrder & { fileUrl?: string }): 
   if (error) console.warn('Supabase unavailable (add special_order):', error.message)
 }
 
+export async function updateSpecialOrderAttachment(id: string, fileUrl: string, attachments = 1): Promise<void> {
+  const { error } = await supabase
+    .from('special_orders')
+    .update({ file_url: fileUrl, attachments })
+    .eq('id', id)
+  if (error) console.warn('Supabase unavailable (update special_order attachment):', error.message)
+}
+
+export interface SpecialOrderAttachment {
+  id: string
+  special_order_id: string
+  file_name: string
+  file_url: string
+  file_size: string
+  file_type: string
+  uploaded_at: string
+  uploaded_by: string
+  archived: boolean
+}
+
+function normaliseSpecialOrderAttachment(row: any): SpecialOrderAttachment {
+  return {
+    id: row.id,
+    special_order_id: row.special_order_id,
+    file_name: row.file_name,
+    file_url: row.file_url,
+    file_size: row.file_size,
+    file_type: row.file_type,
+    uploaded_at: row.uploaded_at,
+    uploaded_by: row.uploaded_by,
+    archived: row.archived === true,
+  }
+}
+
+export async function getSpecialOrderAttachments(specialOrderId: string): Promise<SpecialOrderAttachment[]> {
+  const { data, error } = await supabase
+    .from('special_order_attachments')
+    .select('*')
+    .eq('special_order_id', specialOrderId)
+    .order('uploaded_at', { ascending: true })
+
+  if (error) {
+    console.warn('Supabase unavailable (special_order_attachments):', error.message)
+    return []
+  }
+
+  return (data ?? []).map(normaliseSpecialOrderAttachment)
+}
+
+export async function addSpecialOrderAttachment(
+  attachment: Omit<SpecialOrderAttachment, 'uploaded_at'>
+): Promise<SpecialOrderAttachment | null> {
+  const { data, error } = await supabase
+    .from('special_order_attachments')
+    .insert({ ...attachment, uploaded_at: new Date().toISOString() })
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Failed to add special_order_attachment:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    })
+    return null
+  }
+
+  return normaliseSpecialOrderAttachment(data)
+}
+
+export async function archiveSpecialOrderAttachment(attachmentId: string): Promise<void> {
+  const { error } = await supabase
+    .from('special_order_attachments')
+    .update({ archived: true })
+    .eq('id', attachmentId)
+
+  if (error) console.warn('Supabase unavailable (archive special_order_attachment):', error.message)
+}
+
+export async function renameSpecialOrderAttachment(attachmentId: string, fileName: string): Promise<boolean> {
+  const nextName = fileName.trim()
+  if (!nextName) return false
+
+  const { error } = await supabase
+    .from('special_order_attachments')
+    .update({ file_name: nextName })
+    .eq('id', attachmentId)
+
+  if (error) {
+    console.warn('Supabase unavailable (rename special_order_attachment):', error.message)
+    return false
+  }
+
+  return true
+}
+
+export async function syncSpecialOrderAttachmentMeta(specialOrderId: string): Promise<{ attachments: number; fileUrl?: string }> {
+  const { data, error } = await supabase
+    .from('special_order_attachments')
+    .select('*')
+    .eq('special_order_id', specialOrderId)
+    .eq('archived', false)
+    .order('uploaded_at', { ascending: false })
+
+  if (error) {
+    console.warn('Supabase unavailable (sync special_order meta):', error.message)
+    return { attachments: 0 }
+  }
+
+  const active = (data ?? []).map(normaliseSpecialOrderAttachment)
+  const latestUrl = active.length > 0 ? active[0].file_url : null
+
+  const { error: updateError } = await supabase
+    .from('special_orders')
+    .update({ attachments: active.length, file_url: latestUrl })
+    .eq('id', specialOrderId)
+
+  if (updateError) {
+    console.warn('Supabase unavailable (update special_order meta):', updateError.message)
+  }
+
+  return {
+    attachments: active.length,
+    fileUrl: latestUrl ?? undefined,
+  }
+}
+
 export async function deleteSpecialOrder(id: string): Promise<void> {
   const { error } = await supabase.from('special_orders').delete().eq('id', id)
   if (error) console.warn('Supabase unavailable (delete special_order):', error.message)

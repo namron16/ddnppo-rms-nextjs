@@ -1,10 +1,11 @@
 'use client'
 // components/modals/AddSpecialOrderModal.tsx
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import { supabase } from '@/lib/supabase'
 import type { SpecialOrder } from '@/types'
 
 type SOWithUrl = SpecialOrder & { fileUrl?: string }
@@ -17,9 +18,29 @@ interface Props {
 
 export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
   const { toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const today = new Date().toISOString().split('T')[0]
+
   const [form, setForm] = useState({ reference: '', subject: '', date: '', status: 'ACTIVE' })
+  const [file, setFile] = useState<File | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const field = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }))
+
+  function handleFileChange(incoming: File | null) {
+    if (!incoming) return
+    setFile(incoming)
+    setForm(prev => (prev.date ? prev : { ...prev, date: today }))
+  }
+
+  function resetAndClose() {
+    setForm({ reference: '', subject: '', date: '', status: 'ACTIVE' })
+    setFile(null)
+    setDragging(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    onClose()
+  }
 
   async function submit() {
     if (!form.reference || !form.subject || !form.date) {
@@ -27,28 +48,66 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
       return
     }
 
-    const newSO: SOWithUrl = {
-      id:          `so-${Date.now()}`,
-      reference:   form.reference,
-      subject:     form.subject,
-      date:        form.date,
-      attachments: 0,
-      status:      form.status as 'ACTIVE' | 'ARCHIVED',
-    }
+    setUploading(true)
 
-    if (onAdd) {
-      await onAdd(newSO)
-    }
+    try {
+      let fileUrl: string | undefined
 
-    toast.success(`Special Order "${form.reference}" created.`)
-    onClose()
-    setForm({ reference: '', subject: '', date: '', status: 'ACTIVE' })
+      if (file) {
+        const fileName = `special-orders/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
+
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('documents')
+          .upload(fileName, file, { cacheControl: '3600', upsert: false })
+
+        if (storageError) {
+          toast.error('File upload failed. Please try again.')
+          setUploading(false)
+          return
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('documents')
+          .getPublicUrl(storageData.path)
+
+        fileUrl = urlData.publicUrl
+      }
+
+      const newSO: SOWithUrl = {
+        id:          `so-${Date.now()}`,
+        reference:   form.reference,
+        subject:     form.subject,
+        date:        form.date,
+        attachments: 0,
+        status:      form.status as 'ACTIVE' | 'ARCHIVED',
+        fileUrl,
+      }
+
+      if (onAdd) {
+        await onAdd(newSO)
+      }
+
+      toast.success(`Special Order "${form.reference}" created.`)
+      resetAndClose()
+    } catch (err) {
+      console.error(err)
+      toast.error('Something went wrong. Please try again.')
+    } finally {
+      setUploading(false)
+    }
   }
 
   const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
 
+  const fileIcon =
+    file?.name.endsWith('.pdf') ? '📕'
+      : file?.name.match(/\.docx?$/i) ? '📘'
+      : file?.name.match(/\.xlsx?$/i) ? '📗'
+      : file?.name.match(/\.(jpg|jpeg|png|webp)$/i) ? '🖼️'
+      : '📄'
+
   return (
-    <Modal open={open} onClose={onClose} title="New Special Order" width="max-w-lg">
+    <Modal open={open} onClose={uploading ? () => {} : resetAndClose} title="New Special Order" width="max-w-lg">
       <div className="p-6 space-y-4">
 
         <div className="grid grid-cols-2 gap-4">
@@ -57,14 +116,14 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
               SO Reference <span className="text-red-500">*</span>
             </label>
             <input className={cls} placeholder="e.g. SO No. 2024-102"
-              value={form.reference} onChange={e => field('reference', e.target.value)} />
+              value={form.reference} onChange={e => field('reference', e.target.value)} disabled={uploading} />
           </div>
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
               Date <span className="text-red-500">*</span>
             </label>
             <input type="date" className={cls}
-              value={form.date} onChange={e => field('date', e.target.value)} />
+              value={form.date} onChange={e => field('date', e.target.value)} disabled={uploading} />
           </div>
         </div>
 
@@ -73,27 +132,79 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
             Subject <span className="text-red-500">*</span>
           </label>
           <input className={cls} placeholder="e.g. Designation of Officers – Q2"
-            value={form.subject} onChange={e => field('subject', e.target.value)} />
+            value={form.subject} onChange={e => field('subject', e.target.value)} disabled={uploading} />
         </div>
 
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
-          <select className={cls} value={form.status} onChange={e => field('status', e.target.value)}>
+          <select className={cls} value={form.status} onChange={e => field('status', e.target.value)} disabled={uploading}>
             <option>ACTIVE</option>
             <option>ARCHIVED</option>
           </select>
         </div>
 
-        {/* Attachment drop zone */}
-        <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition">
-          <div className="text-2xl mb-1.5">📎</div>
-          <p className="text-sm font-medium text-slate-600 mb-0.5">Attach supporting documents</p>
-          <p className="text-xs text-slate-400">PDF, DOCX — max 20 MB each</p>
-        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+          className="hidden"
+          onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
+        />
+
+        {file ? (
+          <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-2xl flex-shrink-0">{fileIcon}</span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
+                <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              </div>
+            </div>
+            {!uploading && (
+              <button
+                onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3 flex-shrink-0 transition"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ) : (
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragging(false)
+              handleFileChange(e.dataTransfer.files?.[0] ?? null)
+            }}
+            onClick={() => !uploading && fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition select-none ${
+              dragging
+                ? 'border-blue-400 bg-blue-50'
+                : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+            } ${uploading ? 'pointer-events-none opacity-50' : ''}`}
+          >
+            <div className="text-3xl mb-2">📎</div>
+            <p className="text-sm font-medium text-slate-600 mb-1">Click to browse or drag &amp; drop</p>
+            <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
+          </div>
+        )}
+
+        {uploading && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <p className="text-sm text-blue-700 font-medium">
+              {file ? 'Uploading to cloud storage…' : 'Saving special order…'}
+            </p>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2.5 pt-1">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>✅ Create SO</Button>
+          <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={uploading}>
+            {uploading ? 'Uploading…' : '✅ Create SO'}
+          </Button>
         </div>
       </div>
     </Modal>
