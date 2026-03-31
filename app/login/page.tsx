@@ -1,30 +1,47 @@
 'use client'
 // app/login/page.tsx
-// Login screen: left branding panel + right sign-in form.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth'
+import { LoginSchema, zodErrors } from '@/lib/validations'
 
 export default function LoginPage() {
   const { login } = useAuth()
   const router    = useRouter()
   const [email, setEmail]       = useState('rdelacruz@ddnppo.gov.ph')
   const [password, setPassword] = useState('password')
-  const [error, setError]       = useState('')
+  const [errors, setErrors]     = useState<Record<string, string>>({})
+  const [authError, setAuthError] = useState('')
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError('')
-    const success = login(email, password)
-    if (!success) {
-      setError('Invalid credentials. Use the demo credentials below.')
+    setAuthError('')
+
+    // ── Zod validation ──────────────────────────────
+    const result = LoginSchema.safeParse({ email, password })
+    if (!result.success) {
+      setErrors(zodErrors(result.error))
       return
     }
-    const isAdmin = email === 'rdelacruz@ddnppo.gov.ph'
+    setErrors({})
+
+    const success = login(result.data.email, result.data.password)
+    if (!success) {
+      setAuthError('Invalid credentials. Use the demo credentials below.')
+      return
+    }
+    const isAdmin = result.data.email === 'rdelacruz@ddnppo.gov.ph'
     router.push(isAdmin ? '/admin/master' : '/dashboard')
   }
+
+  const inputCls = (field: string) =>
+    `w-full px-4 py-3 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white transition ${
+      errors[field]
+        ? 'border-red-400 focus:border-red-400'
+        : 'border-slate-200 focus:border-blue-500'
+    }`
 
   return (
     <div className="min-h-screen flex">
@@ -32,21 +49,17 @@ export default function LoginPage() {
       <div className="flex-1 login-gradient p-16 flex flex-col justify-center relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full border-[80px] border-white/[0.04]" />
         <div className="absolute -bottom-20 -left-20 w-72 h-72 rounded-full border-[60px] border-white/[0.04]" />
-
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 mb-9">
             <div className="w-2 h-2 bg-yellow-400 rounded-full" />
             <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II - Davao Norte Police Provincial Office</span>
           </div>
-
           <h1 className="font-display text-5xl text-white leading-tight mb-4">
             Records Management<br />System
           </h1>
           <p className="text-white/60 text-[15px] leading-relaxed mb-12 max-w-sm">
-            Secure, centralized document management for Davao Norte
-            Provincial Police Office.
+            Secure, centralized document management for Davao Norte Provincial Police Office.
           </p>
-
           <ul className="space-y-3.5">
             {[
               'Hierarchical document repository',
@@ -70,7 +83,7 @@ export default function LoginPage() {
           Access restricted to authorized DNPPO personnel.
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="space-y-5">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">
               Email Address
@@ -78,10 +91,11 @@ export default function LoginPage() {
             <input
               type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={e => { setEmail(e.target.value); setErrors(p => ({ ...p, email: '' })) }}
               placeholder="yourname@ddnppo.gov.ph"
-              className="w-full px-4 py-3 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:bg-white transition"
+              className={inputCls('email')}
             />
+            {errors.email && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.email}</p>}
           </div>
 
           <div>
@@ -91,15 +105,16 @@ export default function LoginPage() {
             <input
               type="password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={e => { setPassword(e.target.value); setErrors(p => ({ ...p, password: '' })) }}
               placeholder="Enter password"
-              className="w-full px-4 py-3 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:bg-white transition"
+              className={inputCls('password')}
             />
+            {errors.password && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.password}</p>}
           </div>
 
-          {error && (
+          {authError && (
             <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-              {error}
+              {authError}
             </p>
           )}
 
@@ -118,7 +133,6 @@ export default function LoginPage() {
           </Link>
         </p>
 
-        {/* Demo box */}
         <div className="mt-7 p-4 bg-blue-50 border border-blue-200 rounded-lg text-[12.5px] text-slate-600 leading-relaxed">
           <span className="block text-[11px] font-bold uppercase text-blue-600 tracking-wide mb-1">
             Demo Credentials

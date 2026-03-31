@@ -6,6 +6,7 @@ import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase'
+import { AddDocumentSchema, zodErrors } from '@/lib/validations'
 import type { MasterDocument } from '@/types'
 
 type DocWithUrl = MasterDocument & { fileUrl?: string }
@@ -24,25 +25,21 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   const [file, setFile]           = useState<File | null>(null)
   const [dragging, setDragging]   = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [errors, setErrors]       = useState<Record<string, string>>({})
 
   const [form, setForm] = useState({
-    title: '',
-    level: 'REGIONAL',
-    type:  'PDF',
-    date:  today,
-    tag:   'COMPLIANCE',
+    title: '', level: 'REGIONAL', type: 'PDF', date: today, tag: 'COMPLIANCE',
   })
 
   function handleChange(key: string, value: string) {
     setForm(prev => ({ ...prev, [key]: value }))
+    setErrors(prev => ({ ...prev, [key]: '' }))
   }
 
   function handleFileChange(incoming: File | null) {
     if (!incoming) return
     setFile(incoming)
-    // Auto-fill date when a file is attached.
     setForm(prev => (prev.date ? prev : { ...prev, date: today }))
-    // Auto-detect file type from extension
     const ext = incoming.name.split('.').pop()?.toUpperCase() ?? ''
     if (['PDF', 'DOCX', 'DOC', 'XLSX', 'XLS'].includes(ext)) {
       const mapped = ext.startsWith('DOC') ? 'DOCX' : ext.startsWith('XLS') ? 'XLSX' : ext
@@ -54,6 +51,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
 
   function resetAndClose() {
     setForm({ title: '', level: 'REGIONAL', type: 'PDF', date: today, tag: 'COMPLIANCE' })
+    setErrors({})
     setFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
     setDragging(false)
@@ -61,16 +59,15 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   }
 
   async function handleSubmit() {
-    if (!form.title.trim()) {
-      toast.error('Please enter a document title.')
+    // ── Zod validation ──────────────────────────────
+    const result = AddDocumentSchema.safeParse(form)
+    if (!result.success) {
+      setErrors(zodErrors(result.error))
       return
     }
-    if (!form.date) {
-      toast.error('Please select a document date.')
-      return
-    }
-
+    setErrors({})
     setUploading(true)
+
     try {
       let fileUrl: string | undefined
       let fileSize = '—'
@@ -87,28 +84,24 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           return
         }
 
-        const { data: urlData } = supabase.storage
-          .from('documents')
-          .getPublicUrl(storageData.path)
-
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
         fileUrl  = urlData.publicUrl
         fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB'
       }
 
       const newDoc: DocWithUrl = {
         id:      `md-${Date.now()}`,
-        title:   form.title.trim(),
-        level:   form.level as MasterDocument['level'],
-        type:    form.type,
-        date:    form.date,
+        title:   result.data.title,
+        level:   result.data.level as MasterDocument['level'],
+        type:    result.data.type,
+        date:    result.data.date,
         size:    fileSize,
-        tag:     form.tag,
+        tag:     result.data.tag,
         fileUrl,
       }
 
       if (onAdd) await onAdd(newDoc)
-
-      toast.success(`"${form.title}" uploaded successfully.`)
+      toast.success(`"${result.data.title}" uploaded successfully.`)
       resetAndClose()
     } catch (err) {
       console.error(err)
@@ -118,13 +111,15 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     }
   }
 
-  const selectClass = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition disabled:opacity-50'
-  const inputClass  = selectClass
+  const cls = (f: string) =>
+    `w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition disabled:opacity-50 ${
+      errors[f] ? 'border-red-400 focus:border-red-400' : 'border-slate-200'
+    }`
 
   const fileIcon =
-    file?.name.endsWith('.pdf')          ? '📕'
-    : file?.name.match(/\.docx?$/i)     ? '📘'
-    : file?.name.match(/\.xlsx?$/i)     ? '📗'
+    file?.name.endsWith('.pdf')              ? '📕'
+    : file?.name.match(/\.docx?$/i)         ? '📘'
+    : file?.name.match(/\.xlsx?$/i)         ? '📗'
     : file?.name.match(/\.(jpg|jpeg|png|webp)$/i) ? '🖼️'
     : '📄'
 
@@ -132,25 +127,22 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     <Modal open={open} onClose={uploading ? () => {} : resetAndClose} title="Upload Master Document" width="max-w-lg">
       <div className="p-6 space-y-4">
 
-        {/* Title */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
             Document Title <span className="text-red-500">*</span>
           </label>
-          <input
-            className={inputClass}
-            value={form.title}
+          <input className={cls('title')} value={form.title}
             onChange={e => handleChange('title', e.target.value)}
             placeholder="e.g. RO XI General Circular No. 2024-08"
-            disabled={uploading}
-          />
+            disabled={uploading} />
+          {errors.title && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.title}</p>}
         </div>
 
-        {/* Level + Tag */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Level</label>
-            <select className={selectClass} value={form.level} onChange={e => handleChange('level', e.target.value)} disabled={uploading}>
+            <select className={cls('level')} value={form.level}
+              onChange={e => handleChange('level', e.target.value)} disabled={uploading}>
               <option value="REGIONAL">Regional</option>
               <option value="PROVINCIAL">Provincial</option>
               <option value="STATION">Station</option>
@@ -158,7 +150,8 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Tag</label>
-            <select className={selectClass} value={form.tag} onChange={e => handleChange('tag', e.target.value)} disabled={uploading}>
+            <select className={cls('tag')} value={form.tag}
+              onChange={e => handleChange('tag', e.target.value)} disabled={uploading}>
               <option value="COMPLIANCE">Compliance</option>
               <option value="DIRECTIVE">Directive</option>
               <option value="CIRCULAR">Circular</option>
@@ -167,23 +160,19 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
         </div>
 
-        {/* Date + File Type */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
               Document Date <span className="text-red-500">*</span>
             </label>
-            <input
-              type="date"
-              className={inputClass}
-              value={form.date}
-              onChange={e => handleChange('date', e.target.value)}
-              disabled={uploading}
-            />
+            <input type="date" className={cls('date')} value={form.date}
+              onChange={e => handleChange('date', e.target.value)} disabled={uploading} />
+            {errors.date && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.date}</p>}
           </div>
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">File Type</label>
-            <select className={selectClass} value={form.type} onChange={e => handleChange('type', e.target.value)} disabled={uploading}>
+            <select className={cls('type')} value={form.type}
+              onChange={e => handleChange('type', e.target.value)} disabled={uploading}>
               <option value="PDF">PDF</option>
               <option value="DOCX">DOCX</option>
               <option value="XLSX">XLSX</option>
@@ -192,16 +181,11 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
         </div>
 
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
+        <input ref={fileInputRef} type="file"
           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
           className="hidden"
-          onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
-        />
+          onChange={e => handleFileChange(e.target.files?.[0] ?? null)} />
 
-        {/* File selected state */}
         {file ? (
           <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
             <div className="flex items-center gap-3 min-w-0">
@@ -212,38 +196,24 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
               </div>
             </div>
             {!uploading && (
-              <button
-                onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
-                className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3 flex-shrink-0 transition"
-              >
-                ✕
-              </button>
+              <button onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3 flex-shrink-0 transition">✕</button>
             )}
           </div>
         ) : (
-          /* Drop zone */
-          <div
-            onDragOver={e  => { e.preventDefault(); setDragging(true) }}
+          <div onDragOver={e => { e.preventDefault(); setDragging(true) }}
             onDragLeave={() => setDragging(false)}
-            onDrop={e => {
-              e.preventDefault()
-              setDragging(false)
-              handleFileChange(e.dataTransfer.files?.[0] ?? null)
-            }}
+            onDrop={e => { e.preventDefault(); setDragging(false); handleFileChange(e.dataTransfer.files?.[0] ?? null) }}
             onClick={() => !uploading && fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition select-none ${
-              dragging
-                ? 'border-blue-400 bg-blue-50'
-                : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
-            } ${uploading ? 'pointer-events-none opacity-50' : ''}`}
-          >
+              dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+            } ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
             <div className="text-3xl mb-2">📁</div>
             <p className="text-sm font-medium text-slate-600 mb-1">Click to browse or drag &amp; drop</p>
             <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
           </div>
         )}
 
-        {/* Upload progress indicator */}
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
