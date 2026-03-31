@@ -1,7 +1,7 @@
 'use client'
 // app/admin/user-management/page.tsx
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { PageHeader }    from '@/components/ui/PageHeader'
 import { Badge }         from '@/components/ui/Badge'
 import { Button }        from '@/components/ui/Button'
@@ -118,11 +118,8 @@ export default function UserManagementPage() {
 
   const pendingCount = requests.filter(r => r.status === 'PENDING').length
 
-  useEffect(() => {
-    loadRequests()
-  }, [])
-
-  async function loadRequests() {
+  // ── Load requests ──────────────────────────────
+  const loadRequests = useCallback(async () => {
     setLoadingReqs(true)
     try {
       const { data, error } = await supabase
@@ -132,8 +129,45 @@ export default function UserManagementPage() {
       if (!error && data) setRequests(data as AccessRequest[])
     } catch {}
     setLoadingReqs(false)
-  }
+  }, [])
 
+  // ── Realtime subscription ──────────────────────
+  useEffect(() => {
+    loadRequests()
+
+    const channel = supabase
+      .channel('access_requests_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'access_requests' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newReq = payload.new as AccessRequest
+            setRequests(prev => {
+              // avoid duplicates
+              if (prev.find(r => r.id === newReq.id)) return prev
+              return [newReq, ...prev]
+            })
+            toast.info(`New access request from ${newReq.full_name}`)
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as AccessRequest
+            setRequests(prev =>
+              prev.map(r => r.id === updated.id ? updated : r)
+            )
+          } else if (payload.eventType === 'DELETE') {
+            const deleted = payload.old as AccessRequest
+            setRequests(prev => prev.filter(r => r.id !== deleted.id))
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [loadRequests])
+
+  // ── Approve ────────────────────────────────────
   async function handleApprove() {
     const req = approveDisc.payload
     if (!req) return
@@ -147,6 +181,7 @@ export default function UserManagementPage() {
 
       if (error) throw error
 
+      // Realtime will handle the state update, but update locally too for instant feedback
       setRequests(prev => prev.map(r =>
         r.id === req.id ? { ...r, status: 'APPROVED', reviewed_at: new Date().toISOString() } : r
       ))
@@ -159,6 +194,7 @@ export default function UserManagementPage() {
     approveDisc.close()
   }
 
+  // ── Reject ─────────────────────────────────────
   async function handleReject(id: string, reason: string) {
     try {
       const { error } = await supabase
@@ -172,6 +208,7 @@ export default function UserManagementPage() {
 
       if (error) throw error
 
+      // Realtime will handle, but also update locally for instant feedback
       setRequests(prev => prev.map(r =>
         r.id === id
           ? { ...r, status: 'REJECTED', reviewed_at: new Date().toISOString(), rejection_reason: reason || undefined }
@@ -302,6 +339,12 @@ export default function UserManagementPage() {
               ))}
             </div>
 
+            {/* Realtime indicator */}
+            <div className="flex items-center gap-2 px-1">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <span className="text-xs text-slate-500 font-medium">Live — updates automatically</span>
+            </div>
+
             <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden">
               {/* Toolbar */}
               <div className="flex items-center gap-2.5 px-6 py-4 border-b border-slate-100 bg-slate-50 flex-wrap">
@@ -366,7 +409,7 @@ export default function UserManagementPage() {
                     </thead>
                     <tbody>
                       {displayReqs.map(req => (
-                        <tr key={req.id} className="border-b border-slate-100 hover:bg-slate-50/80 transition group">
+                        <tr key={req.id} className="border-b border-slate-100 hover:bg-slate-50/80 transition">
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-2.5">
                               <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 flex-shrink-0">
@@ -396,17 +439,21 @@ export default function UserManagementPage() {
                           </td>
                           <td className="px-4 py-3.5">
                             {req.status === 'PENDING' ? (
-                              <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition">
+                              /* ── Always-visible approve / reject buttons ── */
+                              <div className="flex items-center gap-1.5">
                                 <button
                                   onClick={() => approveDisc.open(req)}
                                   disabled={approvingId === req.id}
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-50 whitespace-nowrap"
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:bg-emerald-800 transition disabled:opacity-50 whitespace-nowrap shadow-sm"
                                 >
-                                  ✅ Approve
+                                  {approvingId === req.id ? (
+                                    <><div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> Approving…</>
+                                  ) : '✅ Approve'}
                                 </button>
                                 <button
                                   onClick={() => rejectDisc.open(req)}
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition whitespace-nowrap"
+                                  disabled={approvingId === req.id}
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-300 rounded-lg hover:bg-red-100 active:bg-red-200 transition disabled:opacity-50 whitespace-nowrap shadow-sm"
                                 >
                                   🚫 Reject
                                 </button>
