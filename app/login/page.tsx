@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuth } from '@/lib/auth'
 
 export default function LoginPage() {
@@ -21,7 +22,6 @@ export default function LoginPage() {
       setError('Invalid credentials. Use the demo credentials below.')
       return
     }
-    // Redirect based on role
     const isAdmin = email === 'rdelacruz@ddnppo.gov.ph'
     router.push(isAdmin ? '/admin/master' : '/dashboard')
   }
@@ -30,15 +30,13 @@ export default function LoginPage() {
     <div className="min-h-screen flex">
       {/* ── Left: Branding ── */}
       <div className="flex-1 login-gradient p-16 flex flex-col justify-center relative overflow-hidden">
-        {/* Decorative circles */}
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full border-[80px] border-white/[0.04]" />
         <div className="absolute -bottom-20 -left-20 w-72 h-72 rounded-full border-[60px] border-white/[0.04]" />
 
         <div className="relative z-10">
-          {/* Badge */}
           <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 mb-9">
             <div className="w-2 h-2 bg-yellow-400 rounded-full" />
-            <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II - Davao Norte Police PRovincial Office</span>
+            <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II - Davao Norte Police Provincial Office</span>
           </div>
 
           <h1 className="font-display text-5xl text-white leading-tight mb-4">
@@ -115,9 +113,9 @@ export default function LoginPage() {
 
         <p className="text-center mt-4 text-sm text-slate-500">
           No account?{' '}
-          <a href="#" className="text-blue-600 font-medium hover:underline">
+          <Link href="/register" className="text-blue-600 font-medium hover:underline">
             Request access
-          </a>
+          </Link>
         </p>
 
         {/* Demo box */}
