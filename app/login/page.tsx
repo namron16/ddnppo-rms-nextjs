@@ -1,8 +1,5 @@
 'use client'
 // app/login/page.tsx
-// Enhanced with Supabase Realtime — shows a live ticker when new access requests
-// arrive (admin-facing) and shows a live "your request is under review" banner
-// if the user previously submitted a pending request from this browser.
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -11,21 +8,12 @@ import { useAuth } from '@/lib/auth'
 import { LoginSchema, zodErrors } from '@/lib/validations'
 import { supabase } from '@/lib/supabase'
 
-// ── Types ─────────────────────────────────────
-interface PendingRequestBanner {
-  fullName: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'
-  reviewedAt?: string
-}
-
 interface LiveRequestTicker {
   id: string
   fullName: string
   email: string
   submittedAt: string
 }
-
-const PENDING_REQ_KEY = 'ddnppo_pending_request'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -36,42 +24,13 @@ export default function LoginPage() {
   const [errors, setErrors]     = useState<Record<string, string>>({})
   const [authError, setAuthError] = useState('')
 
-  // Realtime state
-  const [pendingBanner, setPendingBanner] = useState<PendingRequestBanner | null>(null)
   const [newRequestTicker, setNewRequestTicker] = useState<LiveRequestTicker | null>(null)
-  const [tickerVisible, setTickerVisible] = useState(false)
+  const [tickerVisible, setTickerVisible]       = useState(false)
   const [realtimeConnected, setRealtimeConnected] = useState(false)
 
   const channelRef    = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const tickerTimeout = useRef<ReturnType<typeof setTimeout>>()
 
-  // ── Check for stored pending request from a previous register ──
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const stored = localStorage.getItem(PENDING_REQ_KEY)
-    if (!stored) return
-    try {
-      const parsed = JSON.parse(stored) as { id: string; fullName: string }
-      // Fetch current status
-      supabase
-        .from('access_requests')
-        .select('status, rejection_reason, reviewed_at, full_name')
-        .eq('id', parsed.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (!data) { localStorage.removeItem(PENDING_REQ_KEY); return }
-          setPendingBanner({
-            fullName: data.full_name,
-            status: data.status,
-            reviewedAt: data.reviewed_at ?? undefined,
-          })
-        })
-    } catch {
-      localStorage.removeItem(PENDING_REQ_KEY)
-    }
-  }, [])
-
-  // ── Dismiss ticker after delay ──
   const showTicker = useCallback((req: LiveRequestTicker) => {
     setNewRequestTicker(req)
     setTickerVisible(true)
@@ -79,7 +38,7 @@ export default function LoginPage() {
     tickerTimeout.current = setTimeout(() => setTickerVisible(false), 6000)
   }, [])
 
-  // ── Supabase Realtime — subscribe to new access requests (admin-facing) ──
+  // Realtime — new access requests ticker (admin-facing only)
   useEffect(() => {
     const channel = supabase
       .channel('login_page_access_requests')
@@ -99,38 +58,6 @@ export default function LoginPage() {
             email:       newReq.email,
             submittedAt: newReq.submitted_at,
           })
-        }
-      )
-      // Also watch for updates in case someone on the register page watches live
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'access_requests' },
-        (payload) => {
-          const updated = payload.new as {
-            id: string
-            full_name: string
-            status: 'PENDING' | 'APPROVED' | 'REJECTED'
-            reviewed_at?: string
-          }
-          // Update pending banner if this matches a stored request
-          if (typeof window !== 'undefined') {
-            const stored = localStorage.getItem(PENDING_REQ_KEY)
-            if (stored) {
-              try {
-                const parsed = JSON.parse(stored) as { id: string }
-                if (parsed.id === updated.id) {
-                  setPendingBanner({
-                    fullName: updated.full_name,
-                    status: updated.status,
-                    reviewedAt: updated.reviewed_at,
-                  })
-                  if (updated.status !== 'PENDING') {
-                    localStorage.removeItem(PENDING_REQ_KEY)
-                  }
-                }
-              } catch {}
-            }
-          }
         }
       )
       .subscribe((status) => {
@@ -203,7 +130,7 @@ export default function LoginPage() {
           </ul>
         </div>
 
-        {/* ── Realtime connection indicator (bottom-left) ── */}
+        {/* Realtime connection indicator */}
         <div className={`flex items-center gap-2 self-start mt-8 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
           realtimeConnected
             ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
@@ -213,7 +140,7 @@ export default function LoginPage() {
           {realtimeConnected ? 'Live updates active' : 'Connecting…'}
         </div>
 
-        {/* ── New request ticker (admin-visible toast) ── */}
+        {/* New request ticker (admin-visible) */}
         <div className={`absolute bottom-6 left-6 right-6 transition-all duration-500 ${
           tickerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
         }`}>
@@ -236,37 +163,6 @@ export default function LoginPage() {
 
       {/* ── Right: Form ── */}
       <div className="w-[460px] bg-white px-14 flex flex-col justify-center">
-
-        {/* Pending-request banner (for users who just submitted) */}
-        {pendingBanner && (
-          <div className={`mb-6 px-4 py-3 rounded-xl border text-sm flex items-start gap-2 ${
-            pendingBanner.status === 'APPROVED' ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : pendingBanner.status === 'REJECTED' ? 'bg-red-50 border-red-200 text-red-800'
-            : 'bg-amber-50 border-amber-200 text-amber-800'
-          }`}>
-            <span className="flex-shrink-0 mt-0.5">
-              {pendingBanner.status === 'APPROVED' ? '✅'
-                : pendingBanner.status === 'REJECTED' ? '🚫' : '⏳'}
-            </span>
-            <div>
-              <p className="font-semibold">
-                {pendingBanner.status === 'APPROVED'
-                  ? `Welcome, ${pendingBanner.fullName}! Your access was approved.`
-                  : pendingBanner.status === 'REJECTED'
-                  ? 'Your access request was rejected.'
-                  : `Hi ${pendingBanner.fullName}, your request is pending review.`}
-              </p>
-              {pendingBanner.status === 'APPROVED' && (
-                <p className="text-xs mt-0.5 opacity-80">You can now sign in with your credentials.</p>
-              )}
-            </div>
-            <button
-              onClick={() => setPendingBanner(null)}
-              className="ml-auto text-current opacity-40 hover:opacity-80"
-            >×</button>
-          </div>
-        )}
-
         <h2 className="font-display text-3xl text-slate-800 mb-2">Sign In</h2>
         <p className="text-slate-500 text-sm mb-9">
           Access restricted to authorized DNPPO personnel.

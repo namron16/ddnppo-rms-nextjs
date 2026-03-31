@@ -1,8 +1,5 @@
 'use client'
 // app/register/page.tsx
-// Enhanced with Supabase Realtime — shows live submission status updates
-// and notifies the applicant when their request is reviewed (approved/rejected).
-// Also persists pending state across page refreshes via localStorage.
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
@@ -10,7 +7,6 @@ import { supabase } from '@/lib/supabase'
 import { AccessRequestSchema, zodErrors } from '@/lib/validations'
 
 type FormState = 'idle' | 'submitting' | 'success' | 'error'
-
 type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
 
 interface LiveUpdate {
@@ -20,72 +16,108 @@ interface LiveUpdate {
   reviewedAt?: string
 }
 
-const PENDING_REQ_KEY = 'ddnppo_pending_request'
+const STORAGE_KEY = 'ddnppo_register_pending'
 
 export default function RegisterPage() {
-  const [formState, setFormState] = useState<FormState>('idle')
-  const [errors, setErrors]       = useState<Record<string, string>>({})
-  const [form, setForm] = useState({ fullName: '', email: '', contactNo: '' })
-  const [submittedId, setSubmittedId]     = useState<string | null>(null)
-  const [liveUpdate, setLiveUpdate]       = useState<LiveUpdate | null>(null)
+  const [formState, setFormState]       = useState<FormState>('idle')
+  const [errors, setErrors]             = useState<Record<string, string>>({})
+  const [form, setForm]                 = useState({ fullName: '', email: '', contactNo: '' })
+  const [submittedId, setSubmittedId]   = useState<string | null>(null)
+  const [liveUpdate, setLiveUpdate]     = useState<LiveUpdate | null>(null)
   const [realtimeActive, setRealtimeActive] = useState(false)
+  const [restoring, setRestoring]       = useState(true)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
-  // ── Restore pending state on mount (survives page refresh) ──
+  // ── Restore state from localStorage on mount ──────────────────────────────
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const stored = localStorage.getItem(PENDING_REQ_KEY)
-    if (!stored) return
-    try {
-      const parsed = JSON.parse(stored) as { id: string; fullName: string }
-      supabase
-        .from('access_requests')
-        .select('status, full_name, rejection_reason, reviewed_at')
-        .eq('id', parsed.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (!data) {
-            localStorage.removeItem(PENDING_REQ_KEY)
-            return
-          }
-
-          // If already reviewed, show the result screen immediately
-          if (data.status === 'APPROVED' || data.status === 'REJECTED') {
-            setSubmittedId(parsed.id)
-            setFormState('success')
-            setForm(f => ({ ...f, fullName: data.full_name }))
-            setLiveUpdate({
-              type: 'reviewed',
-              status: data.status as ReviewStatus,
-              rejectionReason: data.rejection_reason ?? undefined,
-              reviewedAt: data.reviewed_at ?? undefined,
-            })
-            localStorage.removeItem(PENDING_REQ_KEY)
-            return
-          }
-
-          // Still pending — restore the waiting screen
-          setSubmittedId(parsed.id)
-          setFormState('success')
-          setForm(f => ({ ...f, fullName: data.full_name }))
-        })
-    } catch {
-      localStorage.removeItem(PENDING_REQ_KEY)
+    if (typeof window === 'undefined') {
+      setRestoring(false)
+      return
     }
+
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (!stored) {
+      setRestoring(false)
+      return
+    }
+
+    let parsed: { id: string; fullName: string; email: string; contactNo: string } | null = null
+    try {
+      parsed = JSON.parse(stored)
+    } catch {
+      localStorage.removeItem(STORAGE_KEY)
+      setRestoring(false)
+      return
+    }
+
+    if (!parsed?.id) {
+      localStorage.removeItem(STORAGE_KEY)
+      setRestoring(false)
+      return
+    }
+
+    // Fetch the latest status from Supabase
+    supabase
+      .from('access_requests')
+      .select('status, full_name, rejection_reason, reviewed_at')
+      .eq('id', parsed.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error || !data) {
+          // Row doesn't exist — clear and show form
+          localStorage.removeItem(STORAGE_KEY)
+          setRestoring(false)
+          return
+        }
+
+        const status = data.status as ReviewStatus
+
+        if (status === 'APPROVED' || status === 'REJECTED') {
+          // Already reviewed — show result then clear storage
+          localStorage.removeItem(STORAGE_KEY)
+          setForm({
+            fullName:  data.full_name ?? parsed!.fullName,
+            email:     parsed!.email,
+            contactNo: parsed!.contactNo,
+          })
+          setSubmittedId(parsed!.id)
+          setFormState('success')
+          setLiveUpdate({
+            type:            'reviewed',
+            status:          status,
+            rejectionReason: data.rejection_reason ?? undefined,
+            reviewedAt:      data.reviewed_at      ?? undefined,
+          })
+        } else {
+          // Still pending — restore the waiting screen
+          setForm({
+            fullName:  data.full_name ?? parsed!.fullName,
+            email:     parsed!.email,
+            contactNo: parsed!.contactNo,
+          })
+          setSubmittedId(parsed!.id)
+          setFormState('success')
+        }
+
+        setRestoring(false)
+      })
   }, [])
 
-  // ── Subscribe to realtime updates after successful submission ──
+  // ── Realtime subscription ─────────────────────────────────────────────────
   useEffect(() => {
     if (!submittedId) return
 
+    // Don't subscribe if already showing a reviewed result
+    if (liveUpdate?.type === 'reviewed') return
+
     const channel = supabase
-      .channel(`access_request_${submittedId}`)
+      .channel(`register_request_${submittedId}`)
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event:  'UPDATE',
           schema: 'public',
-          table: 'access_requests',
+          table:  'access_requests',
           filter: `id=eq.${submittedId}`,
         },
         (payload) => {
@@ -96,25 +128,20 @@ export default function RegisterPage() {
           }
 
           if (updated.status === 'APPROVED' || updated.status === 'REJECTED') {
-            // Clear persisted state once reviewed
-            localStorage.removeItem(PENDING_REQ_KEY)
+            // Clear localStorage — no longer pending
+            localStorage.removeItem(STORAGE_KEY)
+
             setLiveUpdate({
-              type: 'reviewed',
-              status: updated.status,
+              type:            'reviewed',
+              status:          updated.status,
               rejectionReason: updated.rejection_reason ?? undefined,
-              reviewedAt: updated.reviewed_at ?? undefined,
+              reviewedAt:      updated.reviewed_at      ?? undefined,
             })
           }
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          setRealtimeActive(true)
-          setLiveUpdate(prev => prev?.type === 'reviewed' ? prev : { type: 'connected' })
-        }
-        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          setRealtimeActive(false)
-        }
+        setRealtimeActive(status === 'SUBSCRIBED')
       })
 
     channelRef.current = channel
@@ -124,7 +151,7 @@ export default function RegisterPage() {
       channelRef.current = null
       setRealtimeActive(false)
     }
-  }, [submittedId])
+  }, [submittedId, liveUpdate?.type])
 
   const field = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm(p => ({ ...p, [k]: e.target.value }))
@@ -154,10 +181,15 @@ export default function RegisterPage() {
       })
       if (error) throw error
 
-      // Persist so the pending screen survives a page refresh
+      // Persist to localStorage so refresh restores the pending screen
       localStorage.setItem(
-        PENDING_REQ_KEY,
-        JSON.stringify({ id: newId, fullName: result.data.fullName.trim() })
+        STORAGE_KEY,
+        JSON.stringify({
+          id:        newId,
+          fullName:  result.data.fullName.trim(),
+          email:     result.data.email.trim().toLowerCase(),
+          contactNo: result.data.contactNo.trim(),
+        })
       )
 
       setSubmittedId(newId)
@@ -167,12 +199,35 @@ export default function RegisterPage() {
     }
   }
 
+  function handleTryAgain() {
+    localStorage.removeItem(STORAGE_KEY)
+    setFormState('idle')
+    setLiveUpdate(null)
+    setSubmittedId(null)
+    setErrors({})
+    setForm({ fullName: '', email: '', contactNo: '' })
+  }
+
   const cls = (f: string) =>
     `w-full px-4 py-3 border-[1.5px] rounded-xl text-sm bg-slate-50 focus:outline-none focus:bg-white transition ${
-      errors[f] ? 'border-red-400 focus:border-red-400' : 'border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
+      errors[f]
+        ? 'border-red-400 focus:border-red-400'
+        : 'border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
     }`
 
-  // ── Reviewed State ────────────────────────────────────────────────────────
+  // ── Loading while restoring ───────────────────────────────────────────────
+  if (restoring) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-slate-400">Checking your request status…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Reviewed result screen ────────────────────────────────────────────────
   if (formState === 'success' && liveUpdate?.type === 'reviewed') {
     const approved = liveUpdate.status === 'APPROVED'
     return (
@@ -184,9 +239,11 @@ export default function RegisterPage() {
             }`}>
               {approved ? '🎉' : '🚫'}
             </div>
+
             <h1 className="text-2xl font-bold text-slate-800 mb-2">
               {approved ? 'Access Approved!' : 'Request Rejected'}
             </h1>
+
             <p className="text-slate-500 text-sm mb-6 leading-relaxed">
               {approved
                 ? 'Your access request has been approved by an administrator. You can now sign in to the system.'
@@ -202,7 +259,8 @@ export default function RegisterPage() {
 
             {liveUpdate.reviewedAt && (
               <p className="text-xs text-slate-400 mb-5">
-                Reviewed on {new Date(liveUpdate.reviewedAt).toLocaleString('en-PH', {
+                Reviewed on{' '}
+                {new Date(liveUpdate.reviewedAt).toLocaleString('en-PH', {
                   year: 'numeric', month: 'short', day: 'numeric',
                   hour: '2-digit', minute: '2-digit',
                 })}
@@ -211,22 +269,18 @@ export default function RegisterPage() {
 
             <div className="flex gap-3 justify-center">
               {approved ? (
-                <Link href="/login"
-                  className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-blue-700 transition">
+                <Link
+                  href="/login"
+                  className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-blue-700 transition"
+                >
                   → Sign In Now
                 </Link>
               ) : (
                 <button
-                  onClick={() => {
-                    localStorage.removeItem(PENDING_REQ_KEY)
-                    setFormState('idle')
-                    setLiveUpdate(null)
-                    setSubmittedId(null)
-                    setForm({ fullName: '', email: '', contactNo: '' })
-                  }}
+                  onClick={handleTryAgain}
                   className="inline-flex items-center gap-2 bg-slate-600 text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-slate-700 transition"
                 >
-                  ← Try Again
+                  ← Submit New Request
                 </button>
               )}
             </div>
@@ -236,19 +290,22 @@ export default function RegisterPage() {
     )
   }
 
-  // ── Pending / Success State ───────────────────────────────────────────────
+  // ── Pending / waiting screen ──────────────────────────────────────────────
   if (formState === 'success') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
         <div className="w-full max-w-md">
           <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-8 text-center">
-            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
+            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">
+              ✅
+            </div>
             <h1 className="text-2xl font-bold text-slate-800 mb-2">Request Submitted!</h1>
             <p className="text-slate-500 text-sm mb-6 leading-relaxed">
-              Your access request is now <strong className="text-amber-600">pending review</strong> by an administrator.
+              Your access request is now{' '}
+              <strong className="text-amber-600">pending review</strong> by an administrator.
             </p>
 
-            {/* ── Realtime status badge ── */}
+            {/* Live status indicator */}
             <div className={`flex items-center justify-center gap-2 mb-5 px-4 py-2.5 rounded-full text-xs font-semibold border transition-all ${
               realtimeActive
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
@@ -257,11 +314,11 @@ export default function RegisterPage() {
               {realtimeActive ? (
                 <>
                   <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                  Live — this page will update instantly when reviewed
+                  Live — this page updates instantly when reviewed
                 </>
               ) : (
                 <>
-                  <span className="w-2 h-2 bg-slate-400 rounded-full" />
+                  <span className="w-2 h-2 bg-slate-300 rounded-full" />
                   Connecting to live updates…
                 </>
               )}
@@ -271,10 +328,11 @@ export default function RegisterPage() {
               <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-300">
                 ⏳ Pending Approval
               </span>
-              <p className="text-xs text-amber-700 mt-2">
-                Typical review time is 1–2 business days. You'll see the result here instantly once reviewed.
-                <br />
-                <span className="font-semibold mt-1 block">You can safely close and reopen this page — your status will be restored.</span>
+              <p className="text-xs text-amber-700 mt-2 leading-relaxed">
+                Typical review time is 1–2 business days. This page will update automatically once reviewed.
+                <span className="block font-semibold mt-1">
+                  You can safely close and reopen this page — your status will be restored.
+                </span>
               </p>
             </div>
 
@@ -285,7 +343,10 @@ export default function RegisterPage() {
               <p className="text-sm text-slate-700"><span className="font-semibold">Contact:</span> {form.contactNo}</p>
             </div>
 
-            <Link href="/login" className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-blue-700 transition">
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-blue-700 transition"
+            >
               ← Back to Login
             </Link>
           </div>
@@ -294,7 +355,7 @@ export default function RegisterPage() {
     )
   }
 
-  // ── Form ──────────────────────────────────────────────────────────────────
+  // ── Registration form ─────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex">
       {/* Branding panel */}
@@ -311,20 +372,25 @@ export default function RegisterPage() {
             Submit your information to request access. An administrator will review your request.
           </p>
           <ul className="space-y-3">
-            {['Secure document management', 'Role-based access control', 'Full audit trail', 'Confidential document access'].map(f => (
+            {[
+              'Secure document management',
+              'Role-based access control',
+              'Full audit trail',
+              'Confidential document access',
+            ].map(f => (
               <li key={f} className="flex items-center gap-3 text-white/80 text-sm">
-                <div className="w-2 h-2 bg-yellow-400 rounded-full flex-shrink-0" />{f}
+                <div className="w-2 h-2 bg-yellow-400 rounded-full flex-shrink-0" />
+                {f}
               </li>
             ))}
           </ul>
 
-          {/* Realtime feature callout */}
           <div className="mt-10 flex items-start gap-3 bg-white/10 border border-white/20 rounded-xl px-4 py-3">
             <span className="text-emerald-400 text-lg flex-shrink-0">⚡</span>
             <div>
               <p className="text-white text-xs font-semibold mb-0.5">Live Status Updates</p>
               <p className="text-white/60 text-xs leading-relaxed">
-                After submitting, stay on the confirmation page — it will automatically update the moment an admin reviews your request. Your status is also saved if you refresh.
+                After submitting, this page will automatically update the moment an admin reviews your request.
               </p>
             </div>
           </div>
@@ -338,6 +404,7 @@ export default function RegisterPage() {
             <div className="w-9 h-9 bg-yellow-400 rounded-lg flex items-center justify-center">🛡️</div>
             <span className="text-sm font-bold text-slate-800">DDNPPO Records System</span>
           </div>
+
           <h2 className="font-display text-3xl text-slate-800 mb-1">Create Request</h2>
           <p className="text-slate-500 text-sm mb-8">Fill in your details to request system access.</p>
 
@@ -353,8 +420,14 @@ export default function RegisterPage() {
               <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
                 Full Name <span className="text-red-500">*</span>
               </label>
-              <input type="text" className={cls('fullName')} placeholder="e.g. Ana Marie Santos"
-                value={form.fullName} onChange={field('fullName')} disabled={formState === 'submitting'} />
+              <input
+                type="text"
+                className={cls('fullName')}
+                placeholder="e.g. Ana Marie Santos"
+                value={form.fullName}
+                onChange={field('fullName')}
+                disabled={formState === 'submitting'}
+              />
               {errors.fullName && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.fullName}</p>}
             </div>
 
@@ -362,8 +435,14 @@ export default function RegisterPage() {
               <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
                 Email Address <span className="text-red-500">*</span>
               </label>
-              <input type="email" className={cls('email')} placeholder="yourname@ddnppo.gov.ph"
-                value={form.email} onChange={field('email')} disabled={formState === 'submitting'} />
+              <input
+                type="email"
+                className={cls('email')}
+                placeholder="yourname@ddnppo.gov.ph"
+                value={form.email}
+                onChange={field('email')}
+                disabled={formState === 'submitting'}
+              />
               {errors.email && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.email}</p>}
             </div>
 
@@ -371,8 +450,14 @@ export default function RegisterPage() {
               <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
                 Contact Number <span className="text-red-500">*</span>
               </label>
-              <input type="tel" className={cls('contactNo')} placeholder="e.g. 09171234567"
-                value={form.contactNo} onChange={field('contactNo')} disabled={formState === 'submitting'} />
+              <input
+                type="tel"
+                className={cls('contactNo')}
+                placeholder="e.g. 09171234567"
+                value={form.contactNo}
+                onChange={field('contactNo')}
+                disabled={formState === 'submitting'}
+              />
               {errors.contactNo && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.contactNo}</p>}
             </div>
 
@@ -381,11 +466,17 @@ export default function RegisterPage() {
               <span>Your request will be reviewed by an administrator. You will not gain access until approved.</span>
             </div>
 
-            <button type="submit" disabled={formState === 'submitting'}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition text-[15px] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-              {formState === 'submitting'
-                ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Submitting…</>
-                : '📨 Submit Request'}
+            <button
+              type="submit"
+              disabled={formState === 'submitting'}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition text-[15px] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {formState === 'submitting' ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Submitting…
+                </>
+              ) : '📨 Submit Request'}
             </button>
           </form>
 
