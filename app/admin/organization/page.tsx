@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Modal }      from '@/components/ui/Modal'
 import { Button }     from '@/components/ui/Button'
 import { useToast }   from '@/components/ui/Toast'
+import { supabase }   from '@/lib/supabase'
 
 // ── Types ──────────────────────────────────────
 interface OrgMember {
@@ -19,6 +20,18 @@ interface OrgMember {
   initials: string
   color: string
   parentId?: string
+}
+
+type OrgMemberRow = {
+  id: string
+  name: string
+  rank: string | null
+  position: string
+  unit: string | null
+  photo_url: string | null
+  initials: string
+  color: string
+  parent_id: string | null
 }
 
 // ── Layout constants ───────────────────────────
@@ -119,6 +132,99 @@ function saveMembers(m: OrgMember[]) {
   if (typeof window === 'undefined') return
   try { localStorage.setItem(LOCAL_KEY, JSON.stringify(m)) } catch {}
 }
+
+function fromDbRow(row: OrgMemberRow): OrgMember {
+  return {
+    id: row.id,
+    name: row.name,
+    rank: row.rank ?? '',
+    position: row.position,
+    unit: row.unit ?? undefined,
+    photoUrl: row.photo_url ?? undefined,
+    initials: row.initials,
+    color: row.color,
+    parentId: row.parent_id ?? undefined,
+  }
+}
+
+function toDbRow(member: OrgMember): OrgMemberRow {
+  return {
+    id: member.id,
+    name: member.name,
+    rank: member.rank || null,
+    position: member.position,
+    unit: member.unit || null,
+    photo_url: member.photoUrl || null,
+    initials: member.initials,
+    color: member.color,
+    parent_id: member.parentId || null,
+  }
+}
+
+async function loadMembersFromSupabase(): Promise<OrgMember[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('org_members')
+      .select('*')
+
+    if (error) {
+      console.warn('Supabase unavailable (org_members load):', error.message)
+      return null
+    }
+
+    return (data ?? []).map((row: any) => fromDbRow(row as OrgMemberRow))
+  } catch (e) {
+    console.warn('Supabase unavailable (org_members load):', e)
+    return null
+  }
+}
+
+async function syncMembersToSupabase(members: OrgMember[]): Promise<boolean> {
+  try {
+    const rows = members.map(toDbRow)
+
+    if (rows.length > 0) {
+      const { error: upsertError } = await supabase
+        .from('org_members')
+        .upsert(rows, { onConflict: 'id' })
+      if (upsertError) {
+        console.warn('Supabase unavailable (org_members upsert):', upsertError.message)
+        return false
+      }
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('org_members')
+      .select('id')
+
+    if (existingError) {
+      console.warn('Supabase unavailable (org_members select ids):', existingError.message)
+      return false
+    }
+
+    const keepIds = new Set(members.map(m => m.id))
+    const deleteIds = (existing ?? [])
+      .map((r: any) => r.id as string)
+      .filter((id: string) => !keepIds.has(id))
+
+    if (deleteIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('org_members')
+        .delete()
+        .in('id', deleteIds)
+      if (deleteError) {
+        console.warn('Supabase unavailable (org_members delete stale):', deleteError.message)
+        return false
+      }
+    }
+
+    return true
+  } catch (e) {
+    console.warn('Supabase unavailable (org_members sync):', e)
+    return false
+  }
+}
+
 function getInitials(name: string) {
   return name.split(' ').filter(Boolean).map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
 }
@@ -629,6 +735,7 @@ export default function OrganizationPage() {
   const [showClear,  setShowClear]  = useState(false)
   const [defaultParentId, setDefaultParentId] = useState<string | undefined>()
   const [isLayoutEdit, setIsLayoutEdit] = useState(false)
+  const [hydrated, setHydrated] = useState(false)
 
   const [pan,       setPan]     = useState({ x: 0, y: 0 })
   const [zoom,      setZoom]    = useState(1)
@@ -637,8 +744,31 @@ export default function OrganizationPage() {
   const panStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
   const canvasRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { setMembers(loadMembers()) }, [])
-  useEffect(() => { saveMembers(members) }, [members])
+  useEffect(() => {
+    async function hydrateMembers() {
+      const localMembers = loadMembers()
+      if (localMembers.length > 0) setMembers(localMembers)
+
+      const dbMembers = await loadMembersFromSupabase()
+
+      if (dbMembers && dbMembers.length > 0) {
+        setMembers(dbMembers)
+        saveMembers(dbMembers)
+      } else if (dbMembers && localMembers.length > 0) {
+        await syncMembersToSupabase(localMembers)
+      }
+
+      setHydrated(true)
+    }
+
+    hydrateMembers()
+  }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
+    saveMembers(members)
+    void syncMembersToSupabase(members)
+  }, [members, hydrated])
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return

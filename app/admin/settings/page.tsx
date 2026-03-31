@@ -1,12 +1,13 @@
 'use client'
 // app/admin/settings/page.tsx
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button }     from '@/components/ui/Button'
 import { Badge }      from '@/components/ui/Badge'
 import { Modal }      from '@/components/ui/Modal'
 import { useToast }   from '@/components/ui/Toast'
+import { supabase }   from '@/lib/supabase'
 
 // ── Types ─────────────────────────────────────
 
@@ -675,40 +676,390 @@ function BackupExportTab() {
   const [logDateFrom, setLogDateFrom] = useState('')
   const [logDateTo,   setLogDateTo]   = useState('')
   const [storageViewOpen, setStorageViewOpen] = useState(false)
+  const [exportTarget, setExportTarget] = useState<'device' | 'cloud'>('device')
+  const [cloudExportBasePath, setCloudExportBasePath] = useState('backups')
 
-  // Mock storage data
-  const storageUsed    = 1.8
-  const storageTotal   = 5
-  const storagePercent = Math.round((storageUsed / storageTotal) * 100)
+  const [loadingStorage, setLoadingStorage] = useState(true)
+  const [storageUsedMb, setStorageUsedMb] = useState(0)
+  const [storageSlices, setStorageSlices] = useState<Array<{ label: string; mb: number; color: string }>>([])
+  const [largestFiles, setLargestFiles] = useState<Array<{ name: string; sizeMb: number; type: string }>>([])
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
 
-  const STORAGE_BREAKDOWN = [
-    { label: 'Master Documents', size: '620 MB', color: 'bg-blue-500',    pct: 34 },
-    { label: 'Classified Docs',  size: '410 MB', color: 'bg-red-500',     pct: 23 },
-    { label: '201 Files',        size: '510 MB', color: 'bg-violet-500',  pct: 28 },
-    { label: 'e-Library',        size: '190 MB', color: 'bg-emerald-500', pct: 10 },
-    { label: 'Other',            size: '90 MB',  color: 'bg-slate-400',   pct: 5  },
-  ]
+  const storageTotalGb = 5
 
-  const TOP_FILES = [
-    { name: 'SO-2024-001_designation_officers.pdf', size: '18.2 MB', type: 'Special Order' },
-    { name: 'Intel_Report_Alpha8_CLASSIFIED.pdf',   size: '14.7 MB', type: 'Classified' },
-    { name: 'PNP_Anti_Corruption_Manual_2024.pdf',  size: '12.1 MB', type: 'e-Library' },
-    { name: 'RO_XI_General_Circular_2024-08.pdf',   size: '9.8 MB',  type: 'Master Doc' },
-    { name: 'Santos_Ana_201_Records.zip',           size: '8.3 MB',  type: '201 File' },
-  ]
+  const parseSizeToMb = (value: string | number | null | undefined): number => {
+    if (value === null || value === undefined) return 0
+    if (typeof value === 'number') return value
 
-  async function handleExport(label: string) {
+    const text = String(value).trim().toUpperCase()
+    const matched = text.match(/([\d.]+)\s*(KB|MB|GB|B)?/)
+    if (!matched) return 0
+
+    const amount = Number(matched[1])
+    const unit = matched[2] ?? 'MB'
+    if (!Number.isFinite(amount)) return 0
+
+    if (unit === 'GB') return amount * 1024
+    if (unit === 'MB') return amount
+    if (unit === 'KB') return amount / 1024
+    return amount / (1024 * 1024)
+  }
+
+  const formatMb = (mb: number) => {
+    if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`
+    if (mb >= 1) return `${mb.toFixed(1)} MB`
+    return `${Math.max(0, Math.round(mb * 1024))} KB`
+  }
+
+  const toCsv = (rows: Array<Record<string, unknown>>, columns: string[]) => {
+    const escapeCsv = (value: unknown) => {
+      const raw = value === null || value === undefined ? '' : String(value)
+      return `"${raw.replace(/"/g, '""')}"`
+    }
+
+    const header = columns.map(escapeCsv).join(',')
+    const body = rows.map(row => columns.map(col => escapeCsv(row[col])).join(',')).join('\n')
+    return `${header}\n${body}`
+  }
+
+  const downloadCsv = (filename: string, csvText: string) => {
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const saveCsvToDevice = async (filename: string, csvText: string) => {
+    const filePicker = (window as any).showSaveFilePicker
+    if (typeof filePicker !== 'function') {
+      downloadCsv(filename, csvText)
+      return
+    }
+
+    const handle = await filePicker({
+      suggestedName: filename,
+      types: [
+        {
+          description: 'CSV file',
+          accept: { 'text/csv': ['.csv'] },
+        },
+      ],
+    })
+
+    const writable = await handle.createWritable()
+    await writable.write(csvText)
+    await writable.close()
+  }
+
+  const persistCsv = async (
+    filename: string,
+    csvText: string,
+    label: string,
+    silent = false
+  ) => {
+    if (exportTarget === 'device') {
+      await saveCsvToDevice(filename, csvText)
+      if (!silent) {
+        toast.success(`${label} saved to your chosen device location.`)
+      }
+      return
+    }
+
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' })
+    const basePath = cloudExportBasePath.replace(/^\/+|\/+$/g, '')
+    const cloudPath = basePath ? `${basePath}/${filename}` : filename
+
+    const { data, error } = await supabase.storage
+      .from('documents')
+      .upload(cloudPath, blob, {
+        contentType: 'text/csv;charset=utf-8',
+        upsert: false,
+      })
+
+    if (error) throw error
+
+    if (!silent) {
+      toast.success(`${label} saved to cloud: ${cloudPath}`)
+    }
+
+    return data.path
+  }
+
+  const buildNextBackupText = useMemo(() => {
+    const now = new Date()
+    const [hour, minute] = backup.backup_time.split(':').map(Number)
+    const next = new Date(now)
+    next.setHours(hour || 0, minute || 0, 0, 0)
+
+    if (backup.frequency === 'daily') {
+      if (next <= now) next.setDate(next.getDate() + 1)
+    }
+    if (backup.frequency === 'weekly') {
+      if (next <= now) next.setDate(next.getDate() + 7)
+    }
+    if (backup.frequency === 'monthly') {
+      if (next <= now) next.setMonth(next.getMonth() + 1)
+    }
+
+    const diffMs = Math.max(0, next.getTime() - now.getTime())
+    const diffHrs = Math.round(diffMs / (1000 * 60 * 60))
+
+    return {
+      label: next.toLocaleString('en-PH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      eta: diffHrs <= 1 ? 'In about 1 hour' : `In about ${diffHrs} hours`,
+    }
+  }, [backup.frequency, backup.backup_time])
+
+  const refreshStorageData = useCallback(async () => {
+    setLoadingStorage(true)
+    try {
+      const [
+        masterRes,
+        specialAttRes,
+        libraryRes,
+        classifiedRes,
+        docs201Res,
+      ] = await Promise.all([
+        supabase.from('master_documents').select('id, title, size, archived'),
+        supabase.from('special_order_attachments').select('id, file_name, file_size, archived'),
+        supabase.from('library_items').select('id, title, size, archived'),
+        supabase.from('confidential_docs').select('id, title, size, archived'),
+        supabase.from('personnel_201_docs').select('id, label, file_size, status, file_url'),
+      ])
+
+      const masterRows = (masterRes.data ?? []).filter((r: any) => r.archived !== true)
+      const specialRows = (specialAttRes.data ?? []).filter((r: any) => r.archived !== true)
+      const libraryRows = (libraryRes.data ?? []).filter((r: any) => r.archived !== true)
+      const classifiedRows = (classifiedRes.data ?? []).filter((r: any) => r.archived !== true)
+      const docs201Rows = (docs201Res.data ?? []).filter((r: any) => !!r.file_url)
+
+      const masterMb = masterRows.reduce((sum: number, r: any) => sum + parseSizeToMb(r.size), 0)
+      const specialMb = specialRows.reduce((sum: number, r: any) => sum + parseSizeToMb(r.file_size), 0)
+      const libraryMb = libraryRows.reduce((sum: number, r: any) => sum + parseSizeToMb(r.size), 0)
+      const classifiedMb = classifiedRows.reduce((sum: number, r: any) => sum + parseSizeToMb(r.size), 0)
+      const docs201Mb = docs201Rows.reduce((sum: number, r: any) => sum + parseSizeToMb(r.file_size), 0)
+
+      const slices = [
+        { label: 'Master Documents', mb: masterMb, color: 'bg-blue-500' },
+        { label: 'Special Orders', mb: specialMb, color: 'bg-indigo-500' },
+        { label: '201 Files', mb: docs201Mb, color: 'bg-violet-500' },
+        { label: 'Classified Docs', mb: classifiedMb, color: 'bg-red-500' },
+        { label: 'e-Library', mb: libraryMb, color: 'bg-emerald-500' },
+      ]
+
+      setStorageSlices(slices)
+      setStorageUsedMb(slices.reduce((sum, s) => sum + s.mb, 0))
+
+      const top = [
+        ...masterRows.map((r: any) => ({ name: r.title, sizeMb: parseSizeToMb(r.size), type: 'Master Doc' })),
+        ...specialRows.map((r: any) => ({ name: r.file_name, sizeMb: parseSizeToMb(r.file_size), type: 'Special Order' })),
+        ...docs201Rows.map((r: any) => ({ name: r.label, sizeMb: parseSizeToMb(r.file_size), type: '201 File' })),
+        ...libraryRows.map((r: any) => ({ name: r.title, sizeMb: parseSizeToMb(r.size), type: 'e-Library' })),
+        ...classifiedRows.map((r: any) => ({ name: r.title, sizeMb: parseSizeToMb(r.size), type: 'Classified' })),
+      ]
+        .filter(f => f.sizeMb > 0)
+        .sort((a, b) => b.sizeMb - a.sizeMb)
+        .slice(0, 10)
+
+      setLargestFiles(top)
+      setLastSyncAt(new Date().toISOString())
+    } catch (error) {
+      console.error('Storage refresh failed:', error)
+      toast.error('Failed to load storage metrics from Supabase.')
+    } finally {
+      setLoadingStorage(false)
+    }
+  }, [toast])
+
+  useEffect(() => {
+    refreshStorageData()
+  }, [refreshStorageData])
+
+  const storagePercent = Math.min(100, Math.round((storageUsedMb / (storageTotalGb * 1024)) * 100))
+
+  async function handleExport(
+    kind: 'master' | 'special' | 'summary201' | 'files201' | 'archived' | 'activity',
+    label: string,
+    silent = false
+  ) {
     setExporting(label)
-    await new Promise(r => setTimeout(r, 1200))
-    setExporting(null)
-    toast.success(`${label} exported successfully.`)
+    try {
+      const timestamp = new Date().toISOString().slice(0, 10)
+
+      if (kind === 'master') {
+        const { data, error } = await supabase
+          .from('master_documents')
+          .select('title, level, type, date, tag')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        const rows = data ?? []
+        await persistCsv(
+          `master-documents-${timestamp}.csv`,
+          toCsv(rows as Array<Record<string, unknown>>, ['title', 'level', 'type', 'date', 'tag']),
+          label,
+          silent
+        )
+      }
+
+      if (kind === 'special') {
+        const { data, error } = await supabase
+          .from('special_orders')
+          .select('reference, subject, date, status')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        const rows = data ?? []
+        await persistCsv(
+          `special-orders-${timestamp}.csv`,
+          toCsv(rows as Array<Record<string, unknown>>, ['reference', 'subject', 'date', 'status']),
+          label,
+          silent
+        )
+      }
+
+      if (kind === 'summary201') {
+        const { data, error } = await supabase
+          .from('personnel_201')
+          .select('name, rank, unit, last_updated')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        const rows = (data ?? []).map((r: any) => ({
+          name: r.name,
+          rank: r.rank,
+          unit: r.unit,
+          last_updated: r.last_updated,
+        }))
+        await persistCsv(
+          `201-files-summary-${timestamp}.csv`,
+          toCsv(rows as Array<Record<string, unknown>>, ['name', 'rank', 'unit', 'last_updated']),
+          label,
+          silent
+        )
+      }
+
+      if (kind === 'files201') {
+        const [personnelRes, docsRes] = await Promise.all([
+          supabase
+            .from('personnel_201')
+            .select('id, name, rank, serial_no, unit'),
+          supabase
+            .from('personnel_201_docs')
+            .select('personnel_id, category, label, status, date_updated, filed_by, file_size, file_url')
+            .order('date_updated', { ascending: false }),
+        ])
+
+        if (personnelRes.error) throw personnelRes.error
+        if (docsRes.error) throw docsRes.error
+
+        const personnelMap = new Map<string, any>()
+        for (const p of (personnelRes.data ?? [])) {
+          personnelMap.set(p.id, p)
+        }
+
+        const rows = (docsRes.data ?? []).map((d: any) => {
+          const person = personnelMap.get(d.personnel_id)
+          return {
+            personnel_name: person?.name ?? 'Unknown',
+            rank: person?.rank ?? '',
+            serial_no: person?.serial_no ?? '',
+            unit: person?.unit ?? '',
+            category: d.category,
+            document_label: d.label,
+            status: d.status,
+            date_updated: d.date_updated,
+            filed_by: d.filed_by,
+            file_size: d.file_size,
+            has_file: d.file_url ? 'Yes' : 'No',
+          }
+        })
+
+        await persistCsv(
+          `201-files-detailed-${timestamp}.csv`,
+          toCsv(rows as Array<Record<string, unknown>>, [
+            'personnel_name',
+            'rank',
+            'serial_no',
+            'unit',
+            'category',
+            'document_label',
+            'status',
+            'date_updated',
+            'filed_by',
+            'file_size',
+            'has_file',
+          ]),
+          label,
+          silent
+        )
+      }
+
+      if (kind === 'archived') {
+        const { data, error } = await supabase
+          .from('archived_docs')
+          .select('title, type, archived_date, archived_by')
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        const rows = data ?? []
+        await persistCsv(
+          `archived-documents-${timestamp}.csv`,
+          toCsv(rows as Array<Record<string, unknown>>, ['title', 'type', 'archived_date', 'archived_by']),
+          label,
+          silent
+        )
+      }
+
+      if (kind === 'activity') {
+        let query = supabase
+          .from('activity_logs')
+          .select('user_name, action, document, date, time, device')
+          .order('created_at', { ascending: false })
+
+        if (logDateFrom) query = query.gte('date', logDateFrom)
+        if (logDateTo) query = query.lte('date', logDateTo)
+
+        const { data, error } = await query
+        if (error) throw error
+        const rows = data ?? []
+        await persistCsv(
+          `activity-logs-${timestamp}.csv`,
+          toCsv(rows as Array<Record<string, unknown>>, ['user_name', 'action', 'document', 'date', 'time', 'device']),
+          label,
+          silent
+        )
+      }
+    } catch (error: any) {
+      console.error(`Export failed for ${label}:`, error)
+      toast.error(error?.message ? `Export failed: ${error.message}` : 'Export failed.')
+    } finally {
+      setExporting(null)
+    }
   }
 
   async function handleExportAll() {
     setExporting('All')
-    await new Promise(r => setTimeout(r, 2000))
-    setExporting(null)
-    toast.success('Full data export package downloaded.')
+    try {
+      await handleExport('master', 'Master Documents', true)
+      await handleExport('special', 'Special Orders', true)
+      await handleExport('summary201', '201 Files Summary', true)
+      await handleExport('files201', '201 Files (Detailed)', true)
+      await handleExport('archived', 'Archived Documents', true)
+      await handleExport('activity', 'Activity Logs', true)
+      toast.success(
+        exportTarget === 'device'
+          ? 'All CSV files saved to your chosen device location(s).'
+          : 'All CSV files saved to cloud storage.'
+      )
+    } finally {
+      setExporting(null)
+    }
   }
 
   function saveBackupSettings() {
@@ -729,8 +1080,8 @@ function BackupExportTab() {
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex items-end justify-between">
           <div>
-            <span className="text-3xl font-extrabold text-slate-800">{storageUsed} GB</span>
-            <span className="text-sm text-slate-400 ml-2">of {storageTotal} GB used</span>
+            <span className="text-3xl font-extrabold text-slate-800">{formatMb(storageUsedMb)}</span>
+            <span className="text-sm text-slate-400 ml-2">of {storageTotalGb} GB limit</span>
           </div>
           <span className={`text-sm font-bold px-3 py-1 rounded-full ${
             storagePercent >= 80 ? 'bg-red-100 text-red-700'
@@ -741,33 +1092,51 @@ function BackupExportTab() {
 
         {/* Main bar */}
         <div className="h-3 bg-slate-100 rounded-full overflow-hidden flex">
-          {STORAGE_BREAKDOWN.map(s => (
+          {storageSlices.map(s => (
             <div
               key={s.label}
               className={`${s.color} h-full transition-all`}
-              style={{ width: `${s.pct}%` }}
-              title={`${s.label}: ${s.size}`}
+              style={{ width: `${storageUsedMb > 0 ? Math.max(2, (s.mb / storageUsedMb) * 100) : 0}%` }}
+              title={`${s.label}: ${formatMb(s.mb)}`}
             />
           ))}
         </div>
 
         {/* Legend */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {STORAGE_BREAKDOWN.map(s => (
+          {storageSlices.map(s => (
             <div key={s.label} className="flex items-center gap-2">
               <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.color}`} />
               <span className="text-xs text-slate-600 truncate">{s.label}</span>
-              <span className="text-xs text-slate-400 ml-auto">{s.size}</span>
+              <span className="text-xs text-slate-400 ml-auto">{formatMb(s.mb)}</span>
             </div>
           ))}
         </div>
 
-        <button
-          onClick={() => setStorageViewOpen(true)}
-          className="text-xs font-semibold text-blue-600 hover:underline"
-        >
-          View largest files →
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setStorageViewOpen(true)}
+            className="text-xs font-semibold text-blue-600 hover:underline"
+          >
+            View largest files →
+          </button>
+
+          <div className="flex items-center gap-3">
+            {loadingStorage ? (
+              <span className="text-xs text-slate-400">Syncing Supabase…</span>
+            ) : (
+              <span className="text-xs text-slate-400">
+                Last sync: {lastSyncAt ? new Date(lastSyncAt).toLocaleString('en-PH') : '—'}
+              </span>
+            )}
+            <button
+              onClick={refreshStorageData}
+              className="text-xs font-semibold text-blue-600 hover:underline"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
       </div>
 
       <Divider />
@@ -857,13 +1226,13 @@ function BackupExportTab() {
       <div className="grid grid-cols-2 gap-4 mt-4">
         <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Last Backup</p>
-          <p className="text-sm font-semibold text-slate-700 mt-1">March 19, 2026 — 02:00 AM</p>
-          <p className="text-[11px] text-emerald-600 mt-0.5">✅ Completed successfully</p>
+          <p className="text-sm font-semibold text-slate-700 mt-1">No recorded backup run in database</p>
+          <p className="text-[11px] text-slate-500 mt-0.5">Connect backup logs table/edge function to show runtime status.</p>
         </div>
         <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Next Scheduled Backup</p>
-          <p className="text-sm font-semibold text-slate-700 mt-1">March 26, 2026 — 02:00 AM</p>
-          <p className="text-[11px] text-blue-600 mt-0.5">⏱ In approximately 6 hours</p>
+          <p className="text-sm font-semibold text-slate-700 mt-1">{buildNextBackupText.label}</p>
+          <p className="text-[11px] text-blue-600 mt-0.5">⏱ {buildNextBackupText.eta}</p>
         </div>
       </div>
 
@@ -876,15 +1245,69 @@ function BackupExportTab() {
       {/* Manual Export */}
       <SectionHeader
         title="Manual Data Export"
-        subtitle="Download data manifests as CSV files. File attachments are not included — metadata only."
+        subtitle="Export data manifests as CSV files to this device or save to cloud storage."
       />
+
+      <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+        <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Export Destination</p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExportTarget('device')}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${
+              exportTarget === 'device'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
+            }`}
+          >
+            ⬇ This device
+          </button>
+          <button
+            onClick={() => setExportTarget('cloud')}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${
+              exportTarget === 'cloud'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
+            }`}
+          >
+            ☁ Cloud storage
+          </button>
+          <span className="text-[11px] text-slate-400 ml-auto">
+            Current: {exportTarget === 'device' ? 'Device Download' : 'Cloud Save'}
+          </span>
+        </div>
+
+        {exportTarget === 'device' ? (
+          <>
+            <p className="text-[11px] text-slate-500 mt-2">
+              Device export will open a Save dialog every time so you can choose exactly where to store each file.
+            </p>
+          </>
+        ) : (
+          <div className="mt-3 space-y-1.5">
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+              Cloud Folder Path
+            </label>
+            <input
+              type="text"
+              className="w-full px-3 py-2 border-[1.5px] border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-500 transition"
+              value={cloudExportBasePath}
+              onChange={e => setCloudExportBasePath(e.target.value)}
+              placeholder="backups/monthly"
+            />
+            <p className="text-[11px] text-slate-500">
+              Files will be saved exactly under: {`${(cloudExportBasePath.replace(/^\/+|\/+$/g, '') || '(bucket root)')}/filename.csv`}
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className="space-y-2">
         {[
-          { label: 'Master Documents',   icon: '📁', desc: 'Title, level, type, date, tag' },
-          { label: 'Special Orders',     icon: '📋', desc: 'Reference, subject, date, status' },
-          { label: '201 Files Summary',  icon: '📔', desc: 'Personnel info and document completion %' },
-          { label: 'Archived Documents', icon: '🗄️', desc: 'Title, type, archived date, archived by' },
+          { key: 'master' as const, label: 'Master Documents',   icon: '📁', desc: 'Title, level, type, date, tag' },
+          { key: 'special' as const, label: 'Special Orders',     icon: '📋', desc: 'Reference, subject, date, status' },
+          { key: 'summary201' as const, label: '201 Files Summary',  icon: '📔', desc: 'Personnel info and last updated date' },
+          { key: 'files201' as const, label: '201 Files (Detailed)', icon: '🧾', desc: 'Per-document checklist rows with file metadata' },
+          { key: 'archived' as const, label: 'Archived Documents', icon: '🗄️', desc: 'Title, type, archived date, archived by' },
         ].map(item => (
           <div
             key={item.label}
@@ -898,7 +1321,7 @@ function BackupExportTab() {
               </div>
             </div>
             <button
-              onClick={() => handleExport(item.label)}
+              onClick={() => handleExport(item.key, item.label)}
               disabled={!!exporting}
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -940,7 +1363,7 @@ function BackupExportTab() {
               />
             </div>
             <button
-              onClick={() => handleExport('Activity Logs')}
+              onClick={() => handleExport('activity', 'Activity Logs')}
               disabled={!!exporting}
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition disabled:opacity-50 ml-auto"
             >
@@ -959,7 +1382,7 @@ function BackupExportTab() {
         <div>
           <p className="text-sm font-bold text-white">Export Everything</p>
           <p className="text-xs text-slate-400 mt-0.5">
-            Download a ZIP file containing all CSVs above as a single package.
+            Download all CSV files from Supabase in one click.
           </p>
         </div>
         <button
@@ -983,14 +1406,16 @@ function BackupExportTab() {
         width="max-w-lg"
       >
         <div className="p-6 space-y-3">
-          {TOP_FILES.map((f, i) => (
+          {largestFiles.length === 0 ? (
+            <div className="text-sm text-slate-500">No file-size metadata available yet.</div>
+          ) : largestFiles.map((f, i) => (
             <div key={i} className="flex items-center gap-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl">
               <span className="text-sm font-bold text-slate-400 w-5 flex-shrink-0">{i + 1}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-slate-700 truncate">{f.name}</p>
                 <p className="text-[10px] text-slate-400 mt-0.5">{f.type}</p>
               </div>
-              <span className="text-xs font-bold text-slate-600 flex-shrink-0">{f.size}</span>
+              <span className="text-xs font-bold text-slate-600 flex-shrink-0">{formatMb(f.sizeMb)}</span>
             </div>
           ))}
           <div className="flex justify-end pt-1">
