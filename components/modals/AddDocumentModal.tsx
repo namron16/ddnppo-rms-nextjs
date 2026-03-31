@@ -19,6 +19,7 @@ interface AddDocumentModalProps {
 export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps) {
   const { toast }    = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const today = new Date().toISOString().split('T')[0]
 
   const [file, setFile]           = useState<File | null>(null)
   const [dragging, setDragging]   = useState(false)
@@ -28,7 +29,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     title: '',
     level: 'REGIONAL',
     type:  'PDF',
-    date:  '',
+    date:  today,
     tag:   'COMPLIANCE',
   })
 
@@ -39,6 +40,8 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   function handleFileChange(incoming: File | null) {
     if (!incoming) return
     setFile(incoming)
+    // Auto-fill date when a file is attached.
+    setForm(prev => (prev.date ? prev : { ...prev, date: today }))
     // Auto-detect file type from extension
     const ext = incoming.name.split('.').pop()?.toUpperCase() ?? ''
     if (['PDF', 'DOCX', 'DOC', 'XLSX', 'XLS'].includes(ext)) {
@@ -50,7 +53,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   }
 
   function resetAndClose() {
-    setForm({ title: '', level: 'REGIONAL', type: 'PDF', date: '', tag: 'COMPLIANCE' })
+    setForm({ title: '', level: 'REGIONAL', type: 'PDF', date: today, tag: 'COMPLIANCE' })
     setFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
     setDragging(false)

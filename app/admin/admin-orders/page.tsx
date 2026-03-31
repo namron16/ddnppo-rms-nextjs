@@ -48,6 +48,7 @@ function ViewSOModal({
   open,
   onClose,
   onAttach,
+  onAttachUnderAttachment,
   onArchiveAttachment,
   onRenameAttachment,
   attachments,
@@ -60,6 +61,7 @@ function ViewSOModal({
   open: boolean
   onClose: () => void
   onAttach: (soId: string, files: FileList) => Promise<void>
+  onAttachUnderAttachment: (parent: SOAttachment, files: FileList) => Promise<void>
   onArchiveAttachment: (att: SOAttachment) => Promise<void>
   onRenameAttachment: (att: SOAttachment, newName: string) => Promise<boolean>
   attachments: SOAttachment[]
@@ -69,31 +71,59 @@ function ViewSOModal({
   renamingId: string | null
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const childFileInputRef = useRef<HTMLInputElement>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null)
+  const [parentAttachment, setParentAttachment] = useState<SOAttachment | null>(null)
 
   useEffect(() => {
     if (!open) {
       setEditingId(null)
       setEditingName('')
+      setPreviewFile(null)
+      setParentAttachment(null)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open || !so) return
+
+    const firstActiveAttachment = attachments.find(att => !att.archived)
+    if (firstActiveAttachment) {
+      setPreviewFile({
+        url: firstActiveAttachment.file_url,
+        name: firstActiveAttachment.file_name,
+      })
+      return
+    }
+
+    if (so.fileUrl) {
+      setPreviewFile({
+        url: so.fileUrl,
+        name: `${so.reference} (Primary File)`,
+      })
+      return
+    }
+
+    setPreviewFile(null)
+  }, [open, so, attachments])
 
   if (!so) return null
 
   const activeAttachments = attachments.filter(att => !att.archived)
   const archivedAttachments = attachments.filter(att => att.archived)
   const displayed = showArchived ? archivedAttachments : activeAttachments
-  const primaryUrl = so.fileUrl
+  const previewUrl = previewFile?.url ?? null
 
-  const isPdf = !!primaryUrl?.match(/\.pdf(\?|$)/i)
-  const isImage = !!primaryUrl?.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)
+  const isPdf = !!previewUrl?.match(/\.pdf(\?|$)/i)
+  const isImage = !!previewUrl?.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)
   const fileIcon = isPdf ? '📕'
-    : primaryUrl?.match(/\.docx?(\?|$)/i) ? '📘' : '📄'
+    : previewUrl?.match(/\.docx?(\?|$)/i) ? '📘' : '📄'
 
   return (
-    <Modal open={open} onClose={onClose} title="Special Order Details" width="max-w-2xl">
+    <Modal open={open} onClose={onClose} title="Special Order Details" width="max-w-4xl">
       <div className="p-6 space-y-5">
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
@@ -116,30 +146,29 @@ function ViewSOModal({
           <span className="text-xs text-slate-400">📎 {activeAttachments.length} attachment(s)</span>
         </div>
 
-        {primaryUrl ? (
+        {previewUrl ? (
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Primary File</span>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">File Preview</p>
+                <p className="text-xs text-slate-600 truncate">{previewFile?.name}</p>
+              </div>
               <div className="flex gap-1.5">
-                <a href={primaryUrl} download target="_blank" rel="noopener noreferrer"
+                <a href={previewUrl} download target="_blank" rel="noopener noreferrer"
                   className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-medium transition">
                   ⬇ Download
-                </a>
-                <a href={primaryUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-medium transition">
-                  🔗 Open
                 </a>
               </div>
             </div>
             {isPdf ? (
-              <iframe src={primaryUrl} className="w-full border-0" style={{ height: '400px' }} title={so.reference} />
+              <iframe src={previewUrl} className="w-full border-0" style={{ height: '400px' }} title={previewFile?.name ?? so.reference} />
             ) : isImage ? (
-              <img src={primaryUrl} alt={so.reference} className="w-full max-h-96 object-contain p-4" />
+              <img src={previewUrl} alt={previewFile?.name ?? so.reference} className="w-full max-h-96 object-contain p-4" />
             ) : (
               <div className="flex flex-col items-center justify-center py-10 text-center">
                 <span className="text-4xl mb-3">{fileIcon}</span>
                 <p className="text-sm text-slate-500 mb-3">Preview not available for this file type.</p>
-                <a href={primaryUrl} download
+                <a href={previewUrl} download
                   className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-700 transition">
                   ⬇ Download to view
                 </a>
@@ -209,6 +238,20 @@ function ViewSOModal({
                   e.target.value = ''
                 }}
               />
+              <input
+                ref={childFileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={e => {
+                  if (parentAttachment && e.target.files && e.target.files.length > 0) {
+                    onAttachUnderAttachment(parentAttachment, e.target.files)
+                  }
+                  e.target.value = ''
+                  setParentAttachment(null)
+                }}
+              />
               {!showArchived && (
                 <Button variant="primary" size="sm" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
                   + Attach file
@@ -228,8 +271,8 @@ function ViewSOModal({
           ) : (
             <div className="divide-y divide-slate-100">
               {displayed.map(att => (
-                <div key={att.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
+                <div key={att.id} className="px-4 py-3 flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1 pr-2">
                     {editingId === att.id ? (
                       <div className="flex items-center gap-2">
                         <input
@@ -250,7 +293,7 @@ function ViewSOModal({
                               setEditingName('')
                             }
                           }}
-                          className="w-full max-w-xs px-2.5 py-1.5 text-sm border border-blue-300 bg-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          className="w-full max-w-md px-2.5 py-1.5 text-sm border border-blue-300 bg-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200"
                           disabled={renamingId === att.id}
                           autoFocus
                         />
@@ -279,23 +322,45 @@ function ViewSOModal({
                         </button>
                       </div>
                     ) : (
-                      <p className={`text-sm font-semibold truncate ${att.archived ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                      <button
+                        onClick={() => {
+                          if (att.archived) return
+                          setParentAttachment(att)
+                          childFileInputRef.current?.click()
+                        }}
+                        className={`block w-full text-sm font-semibold text-left break-words leading-snug hover:underline ${att.archived ? 'text-slate-400 line-through hover:text-slate-500' : 'text-slate-700 hover:text-blue-700'}`}
+                        title={att.archived ? 'Archived attachment' : 'Attach a child file under this attachment'}
+                      >
                         {att.file_name}
-                      </p>
+                      </button>
                     )}
                     <p className="text-xs text-slate-400">
                       {att.file_size} • {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <div className="flex flex-wrap items-center justify-end gap-1.5 flex-shrink-0 max-w-[55%]">
                     {!att.archived && (
-                      <a href={att.file_url} target="_blank" rel="noopener noreferrer"
-                        className="text-xs px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md font-medium transition">
-                        👁 View
-                      </a>
+                      <button
+                        onClick={() => setPreviewFile({ url: att.file_url, name: att.file_name })}
+                        className="text-xs px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md font-medium transition whitespace-nowrap"
+                      >
+                        👁 View here
+                      </button>
+                    )}
+                    {!att.archived && (
+                      <button
+                        onClick={() => {
+                          setParentAttachment(att)
+                          childFileInputRef.current?.click()
+                        }}
+                        disabled={uploading}
+                        className="text-xs px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md font-medium transition disabled:opacity-60 whitespace-nowrap"
+                      >
+                        + Sub-attach
+                      </button>
                     )}
                     <a href={att.file_url} download target="_blank" rel="noopener noreferrer"
-                      className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-medium transition">
+                      className="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-medium transition whitespace-nowrap">
                       ⬇
                     </a>
                     {!att.archived && (
@@ -305,7 +370,7 @@ function ViewSOModal({
                           setEditingName(att.file_name)
                         }}
                         disabled={archivingId === att.id || renamingId === att.id}
-                        className="text-xs px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md font-medium transition disabled:opacity-60"
+                        className="text-xs px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md font-medium transition disabled:opacity-60 whitespace-nowrap"
                       >
                         ✏️ Rename
                       </button>
@@ -314,7 +379,7 @@ function ViewSOModal({
                       <button
                         onClick={() => onArchiveAttachment(att)}
                         disabled={archivingId === att.id || renamingId === att.id}
-                        className="text-xs px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md font-medium transition disabled:opacity-60"
+                        className="text-xs px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md font-medium transition disabled:opacity-60 whitespace-nowrap"
                       >
                         {archivingId === att.id ? 'Archiving…' : '🗄️ Archive'}
                       </button>
@@ -501,6 +566,72 @@ export default function SpecialOrdersPage() {
     }
   }
 
+  async function handleAttachUnderAttachmentFromView(parent: SOAttachment, files: FileList) {
+    setUploadingId(parent.special_order_id)
+
+    try {
+      let addedCount = 0
+
+      for (const file of Array.from(files)) {
+        const fileName = `special-orders/${parent.special_order_id}/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
+
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('documents')
+          .upload(fileName, file, { cacheControl: '3600', upsert: false })
+
+        if (storageError) {
+          toast.error(`Failed to upload "${file.name}".`)
+          continue
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('documents')
+          .getPublicUrl(storageData.path)
+
+        const ext = file.name.split('.').pop()?.toUpperCase() ?? 'FILE'
+        const hierarchicalName = `${parent.file_name} -> ${file.name}`
+
+        const newAtt = await addSpecialOrderAttachment({
+          id: `soa-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          special_order_id: parent.special_order_id,
+          file_name: hierarchicalName,
+          file_url: urlData.publicUrl,
+          file_size: file.size < 1024 * 1024
+            ? `${(file.size / 1024).toFixed(1)} KB`
+            : `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+          file_type: ext,
+          uploaded_by: 'Admin',
+          archived: false,
+        })
+
+        if (!newAtt) {
+          toast.error(`Failed to save "${file.name}".`)
+          continue
+        }
+
+        setAttachmentsMap(prev => {
+          const next = new Map(prev)
+          const list = [...(next.get(parent.special_order_id) ?? []), newAtt]
+          next.set(parent.special_order_id, list)
+          return next
+        })
+
+        addedCount++
+      }
+
+      if (addedCount > 0) {
+        setOrders(prev => prev.map(o => (
+          o.id === parent.special_order_id
+            ? { ...o, attachments: (o.attachments ?? 0) + addedCount }
+            : o
+        )))
+        toast.success(`${addedCount} child attachment${addedCount > 1 ? 's' : ''} added under "${parent.file_name}".`)
+      }
+    } finally {
+      setUploadingId(null)
+    }
+  }
+
   async function handleArchiveAttachmentFromView(att: SOAttachment) {
     setArchivingId(att.id)
 
@@ -626,21 +757,13 @@ export default function SpecialOrdersPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3.5">
-                        {so.fileUrl ? (
-                          <a
-                            href={so.fileUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-medium px-2 py-1 rounded-full hover:bg-blue-100 transition"
-                            title="Open attachment"
-                          >
-                            📎 {so.attachments}
-                          </a>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-xs font-medium px-2 py-1 rounded-full">
-                            📎 {so.attachments}
-                          </span>
-                        )}
+                        <button
+                          onClick={() => viewDisc.open(so)}
+                          className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full transition ${so.attachments > 0 ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          title="View attachments"
+                        >
+                          📎 {so.attachments}
+                        </button>
                       </td>
                       <td className="px-4 py-3.5">
                         <Badge className={statusBadgeClass(so.status)}>{so.status}</Badge>
@@ -666,6 +789,7 @@ export default function SpecialOrdersPage() {
         open={viewDisc.isOpen}
         onClose={viewDisc.close}
         onAttach={handleAttachFromView}
+        onAttachUnderAttachment={handleAttachUnderAttachmentFromView}
         onArchiveAttachment={handleArchiveAttachmentFromView}
         onRenameAttachment={handleRenameAttachmentFromView}
         attachments={viewDisc.payload?.id ? (attachmentsMap.get(viewDisc.payload.id) ?? []) : []}
