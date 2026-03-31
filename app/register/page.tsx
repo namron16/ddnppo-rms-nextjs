@@ -2,6 +2,7 @@
 // app/register/page.tsx
 // Enhanced with Supabase Realtime — shows live submission status updates
 // and notifies the applicant when their request is reviewed (approved/rejected).
+// Also persists pending state across page refreshes via localStorage.
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
@@ -19,6 +20,8 @@ interface LiveUpdate {
   reviewedAt?: string
 }
 
+const PENDING_REQ_KEY = 'ddnppo_pending_request'
+
 export default function RegisterPage() {
   const [formState, setFormState] = useState<FormState>('idle')
   const [errors, setErrors]       = useState<Record<string, string>>({})
@@ -27,6 +30,49 @@ export default function RegisterPage() {
   const [liveUpdate, setLiveUpdate]       = useState<LiveUpdate | null>(null)
   const [realtimeActive, setRealtimeActive] = useState(false)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  // ── Restore pending state on mount (survives page refresh) ──
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const stored = localStorage.getItem(PENDING_REQ_KEY)
+    if (!stored) return
+    try {
+      const parsed = JSON.parse(stored) as { id: string; fullName: string }
+      supabase
+        .from('access_requests')
+        .select('status, full_name, rejection_reason, reviewed_at')
+        .eq('id', parsed.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!data) {
+            localStorage.removeItem(PENDING_REQ_KEY)
+            return
+          }
+
+          // If already reviewed, show the result screen immediately
+          if (data.status === 'APPROVED' || data.status === 'REJECTED') {
+            setSubmittedId(parsed.id)
+            setFormState('success')
+            setForm(f => ({ ...f, fullName: data.full_name }))
+            setLiveUpdate({
+              type: 'reviewed',
+              status: data.status as ReviewStatus,
+              rejectionReason: data.rejection_reason ?? undefined,
+              reviewedAt: data.reviewed_at ?? undefined,
+            })
+            localStorage.removeItem(PENDING_REQ_KEY)
+            return
+          }
+
+          // Still pending — restore the waiting screen
+          setSubmittedId(parsed.id)
+          setFormState('success')
+          setForm(f => ({ ...f, fullName: data.full_name }))
+        })
+    } catch {
+      localStorage.removeItem(PENDING_REQ_KEY)
+    }
+  }, [])
 
   // ── Subscribe to realtime updates after successful submission ──
   useEffect(() => {
@@ -50,6 +96,8 @@ export default function RegisterPage() {
           }
 
           if (updated.status === 'APPROVED' || updated.status === 'REJECTED') {
+            // Clear persisted state once reviewed
+            localStorage.removeItem(PENDING_REQ_KEY)
             setLiveUpdate({
               type: 'reviewed',
               status: updated.status,
@@ -62,7 +110,7 @@ export default function RegisterPage() {
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setRealtimeActive(true)
-          setLiveUpdate({ type: 'connected' })
+          setLiveUpdate(prev => prev?.type === 'reviewed' ? prev : { type: 'connected' })
         }
         if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
           setRealtimeActive(false)
@@ -105,6 +153,13 @@ export default function RegisterPage() {
         submitted_at: new Date().toISOString(),
       })
       if (error) throw error
+
+      // Persist so the pending screen survives a page refresh
+      localStorage.setItem(
+        PENDING_REQ_KEY,
+        JSON.stringify({ id: newId, fullName: result.data.fullName.trim() })
+      )
+
       setSubmittedId(newId)
       setFormState('success')
     } catch {
@@ -163,6 +218,7 @@ export default function RegisterPage() {
               ) : (
                 <button
                   onClick={() => {
+                    localStorage.removeItem(PENDING_REQ_KEY)
                     setFormState('idle')
                     setLiveUpdate(null)
                     setSubmittedId(null)
@@ -205,7 +261,7 @@ export default function RegisterPage() {
                 </>
               ) : (
                 <>
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-spin border border-slate-400 border-t-transparent" />
+                  <span className="w-2 h-2 bg-slate-400 rounded-full" />
                   Connecting to live updates…
                 </>
               )}
@@ -215,7 +271,11 @@ export default function RegisterPage() {
               <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-300">
                 ⏳ Pending Approval
               </span>
-              <p className="text-xs text-amber-700 mt-2">Typical review time is 1–2 business days. You'll see the result here instantly once reviewed.</p>
+              <p className="text-xs text-amber-700 mt-2">
+                Typical review time is 1–2 business days. You'll see the result here instantly once reviewed.
+                <br />
+                <span className="font-semibold mt-1 block">You can safely close and reopen this page — your status will be restored.</span>
+              </p>
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-6 text-left space-y-1.5">
@@ -264,7 +324,7 @@ export default function RegisterPage() {
             <div>
               <p className="text-white text-xs font-semibold mb-0.5">Live Status Updates</p>
               <p className="text-white/60 text-xs leading-relaxed">
-                After submitting, stay on the confirmation page — it will automatically update the moment an admin reviews your request.
+                After submitting, stay on the confirmation page — it will automatically update the moment an admin reviews your request. Your status is also saved if you refresh.
               </p>
             </div>
           </div>
