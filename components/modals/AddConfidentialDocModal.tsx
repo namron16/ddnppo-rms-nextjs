@@ -26,6 +26,7 @@ async function hashPassword(password: string): Promise<string> {
 export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
   const { toast }    = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const today = new Date().toISOString().split('T')[0]
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dragging, setDragging]         = useState(false)
   const [uploading, setUploading]       = useState(false)
@@ -34,7 +35,7 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
 
   const [form, setForm] = useState({
     title: '', classification: 'RESTRICTED', access: 'All w/ Password',
-    date: '', password: '', confirmPassword: '',
+    date: today, password: '', confirmPassword: '',
   })
 
   const field = (k: string, v: string) => {
@@ -43,7 +44,7 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
   }
 
   function resetAndClose() {
-    setForm({ title: '', classification: 'RESTRICTED', access: 'All w/ Password', date: '', password: '', confirmPassword: '' })
+    setForm({ title: '', classification: 'RESTRICTED', access: 'All w/ Password', date: today, password: '', confirmPassword: '' })
     setErrors({})
     setSelectedFile(null)
     setShow(false)

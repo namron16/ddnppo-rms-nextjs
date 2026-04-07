@@ -1146,6 +1146,7 @@ export default function PersonnelFilesPage() {
       if (p.id !== personId) return p
       return {
         ...p,
+        lastUpdated: today,
         documents: p.documents.map(d => {
           if (d.id !== docId) return d
           return { ...d, status, dateUpdated: today, filedBy: 'Admin',
@@ -1159,6 +1160,7 @@ export default function PersonnelFilesPage() {
     if (viewDisc.payload?.id === personId) {
       viewDisc.open({
         ...viewDisc.payload,
+        lastUpdated: today,
         documents: viewDisc.payload.documents.map(d => {
           if (d.id !== docId) return d
           return { ...d, status, dateUpdated: today, filedBy: 'Admin',
@@ -1166,6 +1168,14 @@ export default function PersonnelFilesPage() {
         }),
       })
     }
+
+    supabase
+      .from('personnel_201')
+      .update({ last_updated: today })
+      .eq('id', personId)
+      .then(({ error }) => {
+        if (error) console.warn('last_updated update warning:', error.message)
+      })
   }
 
   function handleProfileSave(personId: string, updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) {
