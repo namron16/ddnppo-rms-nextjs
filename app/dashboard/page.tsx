@@ -72,7 +72,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 bg-yellow-400 rounded-md flex items-center justify-center text-sm">🛡️</div>
           <div>
-            <div className="text-[13px] font-bold text-slate-800 leading-none">DDNPPO Records System</div>
+            <div className="text-[13px] font-bold text-slate-800 leading-none">DNPPO Records System</div>
             <div className="text-[10px] text-slate-400 uppercase tracking-wide">Davao Del Norte Provincial Police Office</div>
           </div>
         </div>

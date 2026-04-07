@@ -196,6 +196,7 @@ function Toggle({
   const track     = size === 'sm' ? 'w-8 h-4' : 'w-10 h-5'
   const thumb     = size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5'
   const translate = checked ? (size === 'sm' ? 'translate-x-4' : 'translate-x-5') : 'translate-x-0.5'
+  const motion    = 'transition-[background-color,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]'
 
   return (
     <button
@@ -204,12 +205,12 @@ function Toggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
-      className={`relative inline-flex items-center ${track} rounded-full transition-colors duration-200 focus:outline-none ${
+      className={`relative inline-flex items-center ${track} rounded-full ${motion} focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-offset-1 active:scale-[0.99] ${
         disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
       } ${checked ? 'bg-blue-600' : 'bg-slate-300'}`}
     >
       <span
-        className={`${thumb} bg-white rounded-full shadow transition-transform duration-200 ${translate}`}
+        className={`${thumb} bg-white rounded-full shadow-sm ${motion} ${translate}`}
       />
     </button>
   )
@@ -1450,7 +1451,7 @@ export default function SettingsPage() {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border-[1.5px] text-left transition-all ${
+              className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border-[1.5px] text-left transition-[border-color,box-shadow,background-color] duration-180 ease-out ${
                 activeTab === tab.key
                   ? 'bg-white border-blue-500 shadow-sm'
                   : 'bg-white border-slate-200 hover:border-slate-300'
