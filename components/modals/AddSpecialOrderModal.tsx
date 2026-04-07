@@ -22,7 +22,7 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const today = new Date().toISOString().split('T')[0]
 
-  const [form, setForm]       = useState({ reference: '', subject: '', date: '', status: 'ACTIVE' })
+  const [form, setForm]       = useState({ reference: '', subject: '', date: today, status: 'ACTIVE' })
   const [errors, setErrors]   = useState<Record<string, string>>({})
   const [file, setFile]       = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -40,7 +40,7 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
   }
 
   function resetAndClose() {
-    setForm({ reference: '', subject: '', date: '', status: 'ACTIVE' })
+    setForm({ reference: '', subject: '', date: today, status: 'ACTIVE' })
     setErrors({})
     setFile(null)
     setDragging(false)
