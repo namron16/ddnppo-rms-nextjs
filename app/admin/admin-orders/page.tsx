@@ -14,6 +14,7 @@ import { Modal }                from '@/components/ui/Modal'
 import { AddSpecialOrderModal } from '@/components/modals/AddSpecialOrderModal'
 import { useModal, useDisclosure } from '@/hooks'
 import { useToast }             from '@/components/ui/Toast'
+import { FileText, Paperclip } from 'lucide-react'
 import {
   getSpecialOrders,
   addSpecialOrder,
@@ -304,11 +305,11 @@ function AttachmentsTablePanel({
       <div className="flex items-start justify-between mb-4 gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl flex-shrink-0">{isDrillDown ? (drillFi?.icon ?? '📄') : '📋'}</span>
+            <span className="text-xl flex-shrink-0">{isDrillDown ? (drillFi?.icon ?? <FileText size={20} />) : '📋'}</span>
             <h2 className="text-lg font-extrabold text-slate-800 leading-tight truncate">{currentLabel}</h2>
             {isDrillDown && (
               <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
-                📎 Nested File
+                <Paperclip size={12} /> Nested File
               </span>
             )}
           </div>
@@ -387,7 +388,7 @@ function AttachmentsTablePanel({
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 flex-shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
-              {isDrillDown ? '📎 Child Attachments' : 'Attachments'}
+              {isDrillDown ? 'Attachments' : 'Attachments'}
             </span>
 
             <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white shadow-sm">
@@ -457,7 +458,7 @@ function AttachmentsTablePanel({
         {displayed.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-14 px-6">
             <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-2xl mb-3">
-              {showArchived ? '🗄️' : isDrillDown ? '📎' : '📂'}
+              {showArchived ? '🗄️' : isDrillDown ? <Paperclip size={16} /> : <FileText size={16} />}
             </div>
             <p className="text-sm font-semibold text-slate-600 mb-1">
               {showArchived ? 'No archived attachments' : `No ${isDrillDown ? 'child ' : ''}attachments yet`}
@@ -577,7 +578,7 @@ function AttachmentsTablePanel({
                             onClick={() => onDrillDown(att)}
                             className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-full transition"
                           >
-                            📎 {children}
+                            <Paperclip size={14} /> {children}
                           </button>
                         ) : (
                           <span className="text-xs text-slate-300">—</span>
@@ -679,7 +680,7 @@ function OrderListNode({
         <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
           isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
         }`}>
-          📎{activeCount}
+          <Paperclip size={13} /> {activeCount}
         </span>
       )}
       {uploadingId === order.id && (

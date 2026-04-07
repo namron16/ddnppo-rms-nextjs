@@ -445,7 +445,7 @@ export default function LibraryPage() {
                           <span className="font-semibold text-sm text-slate-800">{item.title}</span>
                           {item.fileUrl && (
                             <span className="inline-flex items-center bg-emerald-50 text-emerald-600 text-[10px] font-semibold px-1.5 py-0.5 rounded border border-emerald-200">
-                              📎
+                                <Paperclip size={11} />
                             </span>
                           )}
                         </div>

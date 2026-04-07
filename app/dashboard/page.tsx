@@ -13,6 +13,8 @@ import { OrgChart }  from '@/components/ui/OrgChart'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Toolbar, ToolbarSelect } from '@/components/ui/Toolbar'
 import { useToast } from '@/components/ui/Toast'
+import { LogoutConfirmModal } from '@/components/modals/LogoutConfirmModal'
+import { FileText, Paperclip } from 'lucide-react'
 import {
   getMasterDocuments,
   getSpecialOrders,
@@ -195,7 +197,7 @@ function InlineFileViewerModal({
       <div className="flex flex-col" style={{ maxHeight: '85vh' }}>
         <div className="flex items-start justify-between gap-3 px-5 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
           <div className="flex items-start gap-2 min-w-0 flex-1">
-            <span className="text-lg flex-shrink-0">{fi.icon}</span>
+            <span className="text-lg flex-shrink-0 text-blue-600 mt-0.5"><FileText size={18} /></span>
             <p className="text-xs font-semibold text-slate-700 break-all leading-relaxed">{fileName}</p>
           </div>
           <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
@@ -346,6 +348,7 @@ export default function DashboardPage() {
   const [orderAttachmentsByOrder, setOrderAttachmentsByOrder] = useState<Record<string, AttachmentView[]>>({})
   const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null)
   const [classifiedUnlockDoc, setClassifiedUnlockDoc] = useState<ClassifiedView | null>(null)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [expandedMasterDocId, setExpandedMasterDocId] = useState<string | null>(null)
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
 
@@ -377,7 +380,7 @@ export default function DashboardPage() {
             }
           }}
         >
-          <span className="text-sm">{depth > 0 ? '↳' : '📄'}</span>
+            <span className="text-sm flex-shrink-0 text-blue-600">{depth > 0 ? '↳' : <Paperclip size={16} />}</span>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-slate-700 break-all whitespace-normal leading-snug">{att.fileName}</p>
             <p className="text-[11px] text-slate-400 mt-0.5">{att.fileSize}</p>
@@ -592,6 +595,10 @@ export default function DashboardPage() {
   }, [])
 
   function handleLogout() {
+    setShowLogoutConfirm(true)
+  }
+
+  function confirmLogout() {
     logout()
     router.push('/login')
   }
@@ -700,7 +707,7 @@ export default function DashboardPage() {
                               size="sm"
                               onClick={() => setExpandedMasterDocId(expanded ? null : doc.id)}
                             >
-                              📎 {attachments.length}
+                              <Paperclip size={14} className="text-blue-600" /> {attachments.length}
                             </Button>
                           )}
                         </div>
@@ -719,7 +726,7 @@ export default function DashboardPage() {
                             <div className="space-y-2 py-3 min-h-0">
                               {attachments.map(att => (
                                 <div key={att.id} className="flex items-center gap-3 p-2 border border-slate-200 rounded-lg bg-white transition-colors duration-150 hover:border-blue-200">
-                                  <span className="text-sm">📄</span>
+                                  <span className="text-sm flex-shrink-0 text-blue-600"><FileText size={16} /></span>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs font-semibold text-slate-700 break-all whitespace-normal leading-snug">{att.fileName}</p>
                                     <p className="text-[11px] text-slate-400 mt-0.5">{att.fileSize}</p>
@@ -757,7 +764,7 @@ export default function DashboardPage() {
                     {so.fileUrl ? <Button variant="ghost" size="sm" onClick={() => setViewerFile({ url: so.fileUrl!, name: `${so.reference} - ${so.subject}` })}>👁</Button> : <Button variant="ghost" size="sm" disabled>—</Button>}
                     {attachmentCount > 0 && (
                       <Button variant="ghost" size="sm" onClick={() => setExpandedOrderId(expanded ? null : so.id)}>
-                        📎 {attachmentCount}
+                        <Paperclip size={14} className="text-blue-600" /> {attachmentCount}
                       </Button>
                     )}
                   </div>
@@ -888,6 +895,12 @@ export default function DashboardPage() {
       <Modal open={openModal === 'directory'} onClose={() => setOpenModal(null)} title="Organization — Organizational Structure & Directory" width="max-w-2xl">
         {loading ? <EmptyState icon="⏳" title="Loading organization chart..." /> : orgRoot ? <OrgChart root={orgRoot} /> : <EmptyState icon="🏛️" title="No organization members" description="No org chart records yet." />}
       </Modal>
+
+      <LogoutConfirmModal
+        open={showLogoutConfirm}
+        onConfirm={confirmLogout}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
 
       {viewerFile && (
         <InlineFileViewerModal
