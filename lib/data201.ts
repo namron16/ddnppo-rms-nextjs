@@ -2,6 +2,49 @@
 import { supabase } from './supabase'
 import type { Personnel201, Doc201Item, Doc201Status } from '@/types'
 
+const ARCHIVE_AFTER_YEARS = 15
+
+function isSeparatedAndExpired(dateOfSeparation?: string): boolean {
+  if (!dateOfSeparation) return false
+  const separated = new Date(dateOfSeparation)
+  const threshold = new Date(separated)
+  threshold.setFullYear(threshold.getFullYear() + ARCHIVE_AFTER_YEARS)
+  return new Date() >= threshold
+}
+
+type PersonnelArchiveCandidate = {
+  id: string
+  status?: string | null
+  dateOfSeparation?: string | null
+}
+
+/**
+ * Persistently archives personnel records whose separation date is older than
+ * the configured retention period.
+ */
+export async function archiveExpiredPersonnel201Records(
+  records: PersonnelArchiveCandidate[]
+): Promise<Set<string>> {
+  const expiredIds = records
+    .filter(record => record.status === 'Separated from Service' && isSeparatedAndExpired(record.dateOfSeparation ?? undefined))
+    .map(record => record.id)
+
+  if (expiredIds.length === 0) return new Set()
+
+  const today = new Date().toISOString().split('T')[0]
+  const { error } = await supabase
+    .from('personnel_201')
+    .update({ status: 'Archived', last_updated: today })
+    .in('id', expiredIds)
+
+  if (error) {
+    console.warn('archiveExpiredPersonnel201Records warning:', error.message)
+    return new Set()
+  }
+
+  return new Set(expiredIds)
+}
+
 // ── Checklist template ────────────────────────
 function blankChecklist(): Omit<Doc201Item, 'id'>[] {
   return [
