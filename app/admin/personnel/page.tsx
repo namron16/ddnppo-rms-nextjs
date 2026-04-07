@@ -13,6 +13,7 @@ import { useToast }     from '@/components/ui/Toast'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import {
   createPersonnel201,
+  archiveExpiredPersonnel201Records,
   updateDoc201Status,
   uploadDoc201File,
   CATEGORY_LABELS,
@@ -20,6 +21,67 @@ import {
 import { supabase } from '@/lib/supabase'
 import { status201BadgeClass, status201Icon, formatDate } from '@/lib/utils'
 import type { Personnel201, Doc201Item, Doc201Status, Doc201Category } from '@/types'
+
+// ── Status Constants ──────────────────────────
+
+/** Top-level personnel status options */
+export type PersonnelStatus =
+  | 'In Service'
+  | 'Inactive'
+  | 'Separated from Service'
+  | 'Reassigned from Other Unit'
+
+/** Sub-reasons when status === 'Inactive' */
+export type InactiveReason = 'Detached Service' | 'On Schooling' | 'Maternity Leave'
+
+/** Sub-reasons when status === 'Separated from Service' */
+export type SeparatedReason = 'Resigned' | 'Dismissed' | 'Retired' | 'AWOL'
+
+const INACTIVE_REASONS: InactiveReason[] = [
+  'Detached Service',
+  'On Schooling',
+  'Maternity Leave',
+]
+
+const SEPARATED_REASONS: SeparatedReason[] = [
+  'Resigned',
+  'Dismissed',
+  'Retired',
+  'AWOL',
+]
+
+function getTodayISODate() {
+  return new Date().toISOString().split('T')[0]
+}
+
+/** Number of years after separation before a record is auto-archived */
+const ARCHIVE_AFTER_YEARS = 15
+
+/**
+ * Returns true if a "Separated from Service" record should be auto-archived.
+ * @param dateOfSeparation – ISO date string (YYYY-MM-DD)
+ */
+function isSeparatedAndExpired(dateOfSeparation?: string): boolean {
+  if (!dateOfSeparation) return false
+  const separated = new Date(dateOfSeparation)
+  const threshold = new Date(separated)
+  threshold.setFullYear(threshold.getFullYear() + ARCHIVE_AFTER_YEARS)
+  return new Date() >= threshold
+}
+
+/**
+ * Computes years remaining before a separated record auto-archives.
+ * Returns null if not applicable or already past the threshold.
+ */
+function yearsUntilArchive(dateOfSeparation?: string): number | null {
+  if (!dateOfSeparation) return null
+  const separated = new Date(dateOfSeparation)
+  const threshold = new Date(separated)
+  threshold.setFullYear(threshold.getFullYear() + ARCHIVE_AFTER_YEARS)
+  const diff = threshold.getTime() - Date.now()
+  if (diff <= 0) return 0
+  return Math.ceil(diff / (1000 * 60 * 60 * 24 * 365.25))
+}
 
 // ── Blank checklist (fallback for records with no docs in DB) ──
 function makeBlankChecklist(personnelId: string): Doc201Item[] {
@@ -70,6 +132,22 @@ function completionColor(pct: number) {
   return 'bg-red-500'
 }
 
+/** Visual badge config for each personnel status */
+function personnelStatusBadge(status: string) {
+  switch (status) {
+    case 'In Service':
+      return { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: '🟢' }
+    case 'Inactive':
+      return { bg: 'bg-slate-200',   text: 'text-slate-600',   icon: '⏸️' }
+    case 'Separated from Service':
+      return { bg: 'bg-red-100',     text: 'text-red-700',     icon: '🔴' }
+    case 'Reassigned from Other Unit':
+      return { bg: 'bg-blue-100',    text: 'text-blue-700',    icon: '🔄' }
+    default:
+      return { bg: 'bg-slate-100',   text: 'text-slate-500',   icon: '❓' }
+  }
+}
+
 const STATUS_FILTERS: Array<{ label: string; value: Doc201Status | 'ALL' }> = [
   { label: 'All',           value: 'ALL' },
   { label: '✅ Complete',   value: 'COMPLETE' },
@@ -79,6 +157,152 @@ const STATUS_FILTERS: Array<{ label: string; value: Doc201Status | 'ALL' }> = [
 ]
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+// ── Shared: Status + Reason Selector ─────────
+/**
+ * Reusable compound selector for personnel status + conditional reason.
+ * Used in both AddPersonnelModal and EditProfileModal.
+ */
+function StatusReasonSelector({
+  status,
+  inactiveReason,
+  separatedReason,
+  dateOfSeparation,
+  onStatusChange,
+  onInactiveReasonChange,
+  onSeparatedReasonChange,
+  onDateOfSeparationChange,
+  disabled = false,
+}: {
+  status: string
+  inactiveReason: string
+  separatedReason: string
+  dateOfSeparation: string
+  onStatusChange: (v: string) => void
+  onInactiveReasonChange: (v: string) => void
+  onSeparatedReasonChange: (v: string) => void
+  onDateOfSeparationChange: (v: string) => void
+  disabled?: boolean
+}) {
+  const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
+  const isInactive   = status === 'Inactive'
+  const isSeparated  = status === 'Separated from Service'
+  const hasInactiveReason = Boolean(inactiveReason)
+  const hasSeparatedReason = Boolean(separatedReason)
+
+  useEffect(() => {
+    if (isSeparated && !dateOfSeparation) {
+      onDateOfSeparationChange(getTodayISODate())
+    }
+  }, [isSeparated, dateOfSeparation, onDateOfSeparationChange])
+
+  return (
+    <div className="space-y-3">
+      {/* Primary status */}
+      <div>
+        <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+          Status <span className="text-red-500">*</span>
+        </label>
+        <select
+          className={cls}
+          value={status}
+          onChange={e => onStatusChange(e.target.value)}
+          disabled={disabled}
+        >
+          <option value="">Select status…</option>
+          <option value="In Service">In Service</option>
+          <option value="Inactive">Inactive</option>
+          <option value="Separated from Service">Separated from Service</option>
+          <option value="Reassigned from Other Unit">Reassigned from Other Unit</option>
+        </select>
+      </div>
+
+      {/* Inactive reason */}
+      {isInactive && (
+        <div className={`rounded-xl p-4 space-y-2 border ${hasInactiveReason ? 'bg-slate-50 border-slate-200' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-base ${hasInactiveReason ? 'text-slate-400' : 'text-red-500'}`}>⏸️</span>
+            <p className={`text-[12px] font-semibold ${hasInactiveReason ? 'text-slate-700' : 'text-red-800'}`}>Reason for Inactivity</p>
+            <span className={`text-[10px] font-semibold ml-auto ${hasInactiveReason ? 'text-emerald-600' : 'text-red-500'}`}>
+              {hasInactiveReason ? 'Selected' : 'Required'}
+            </span>
+          </div>
+          <select
+            className={`w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-white transition ${hasInactiveReason ? 'border-slate-300 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100' : 'border-red-200 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100'}`}
+            value={inactiveReason}
+            onChange={e => onInactiveReasonChange(e.target.value)}
+            disabled={disabled}
+          >
+            <option value="">Select reason…</option>
+            {INACTIVE_REASONS.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Separated from Service reason + date */}
+      {isSeparated && (
+        <div className={`rounded-xl p-4 space-y-3 border ${hasSeparatedReason ? 'bg-slate-50 border-slate-200' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-start gap-2">
+            <span className={`text-base flex-shrink-0 mt-0.5 ${hasSeparatedReason ? 'text-slate-400' : 'text-red-500'}`}>🔴</span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <p className={`text-[12px] font-semibold leading-snug ${hasSeparatedReason ? 'text-slate-700' : 'text-red-800'}`}>Reason for Separation</p>
+                <span className={`text-[10px] font-semibold ${hasSeparatedReason ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {hasSeparatedReason ? 'Selected' : 'Required'}
+                </span>
+              </div>
+              <p className={`text-[11px] mt-0.5 leading-relaxed ${hasSeparatedReason ? 'text-slate-500' : 'text-red-500'}`}>
+                Records separated from service are automatically archived after <strong>{ARCHIVE_AFTER_YEARS} years</strong>.
+              </p>
+            </div>
+          </div>
+
+          <select
+            className={`w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-white transition ${hasSeparatedReason ? 'border-slate-300 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100' : 'border-red-200 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100'}`}
+            value={separatedReason}
+            onChange={e => onSeparatedReasonChange(e.target.value)}
+            disabled={disabled}
+          >
+            <option value="">Select reason…</option>
+            {SEPARATED_REASONS.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+
+          {/* Date of separation (auto-generated) */}
+          <div>
+            <label className={`block text-[11px] font-semibold uppercase tracking-widest mb-1.5 ${hasSeparatedReason ? 'text-slate-600' : 'text-red-700'}`}>
+              Date of Separation <span className={`text-[10px] font-semibold ${hasSeparatedReason ? 'text-slate-500' : 'text-red-500'}`}>(Auto)</span>
+            </label>
+            <input
+              type="text"
+              readOnly
+              disabled={disabled}
+              className={`w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-white transition disabled:opacity-50 ${hasSeparatedReason ? 'border-slate-300 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100' : 'border-red-200 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100'}`}
+              value={dateOfSeparation || getTodayISODate()}
+            />
+            <p className={`text-[11px] mt-1 ${hasSeparatedReason ? 'text-slate-500' : 'text-red-500'}`}>Date is automatically set when status is marked as separated.</p>
+          </div>
+
+          {/* Archive countdown preview */}
+          {dateOfSeparation && (
+            <div className="flex items-start gap-2 bg-white border border-red-100 rounded-lg px-3 py-2">
+              <span className="text-red-400 text-sm">🗄️</span>
+              <p className="text-[11px] text-red-600 leading-relaxed">
+                {isSeparatedAndExpired(dateOfSeparation)
+                  ? <><strong>This record will be auto-archived</strong> — the {ARCHIVE_AFTER_YEARS}-year retention period has elapsed.</>
+                  : <>📅 Auto-archive scheduled in approximately <strong>{yearsUntilArchive(dateOfSeparation)} year(s)</strong>.</>
+                }
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Inline File Viewer Modal ──────────────────
 function ViewFileModal({ item, open, onClose }: {
@@ -194,16 +418,20 @@ function ChecklistRow({ item, index, onUpload, onView }: {
 
 // ── Personnel Card ────────────────────────────
 function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () => void }) {
-  const pct       = completionPercent(person.documents)
-  const complete  = person.documents.filter(d => d.status === 'COMPLETE').length
-  const missing   = person.documents.filter(d => d.status === 'MISSING').length
-  const forUpdate = person.documents.filter(d => d.status === 'FOR_UPDATE').length
-  const expired   = person.documents.filter(d => d.status === 'EXPIRED').length
-  const isRetired = person.status === 'Retired'
+  const pct        = completionPercent(person.documents)
+  const complete   = person.documents.filter(d => d.status === 'COMPLETE').length
+  const missing    = person.documents.filter(d => d.status === 'MISSING').length
+  const forUpdate  = person.documents.filter(d => d.status === 'FOR_UPDATE').length
+  const expired    = person.documents.filter(d => d.status === 'EXPIRED').length
+  const isSeparated = person.status === 'Separated from Service'
+  const isAutoArchived = isSeparated && isSeparatedAndExpired((person as any).dateOfSeparation)
+  const badge = personnelStatusBadge(person.status ?? '')
 
   return (
     <button onClick={onClick}
-      className="w-full text-left bg-white border-[1.5px] border-slate-200 rounded-xl p-5 hover:border-blue-400 hover:shadow-md transition-all duration-200">
+      className={`w-full text-left bg-white border-[1.5px] rounded-xl p-5 hover:shadow-md transition-all duration-200 ${
+        isAutoArchived ? 'border-red-300 hover:border-red-400 opacity-75' : 'border-slate-200 hover:border-blue-400'
+      }`}>
       <div className="flex items-start gap-3 mb-4">
         {person.photoUrl ? (
           <img src={person.photoUrl} alt={person.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0 border-2 border-white shadow" />
@@ -213,18 +441,34 @@ function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () 
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-800 text-[15px] leading-tight truncate">{person.rank} {person.name}</div>
           <div className="text-xs text-slate-400 mt-0.5">{person.serialNo} · {person.unit}</div>
-          {/* Status + archive badge row */}
+
+          {/* Status badge row */}
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-              isRetired
-                ? 'bg-slate-200 text-slate-600'
-                : 'bg-emerald-100 text-emerald-700'
-            }`}>
-              {isRetired ? '🏅 Retired' : '🟢 Active'}
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${badge.bg} ${badge.text}`}>
+              {badge.icon} {person.status}
             </span>
-            {isRetired && (person as any).archiveAfterYears != null && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                🗄 Archive in {(person as any).archiveAfterYears}y
+            {/* Inactive sub-reason */}
+            {person.status === 'Inactive' && (person as any).inactiveReason && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                {(person as any).inactiveReason}
+              </span>
+            )}
+            {/* Separated sub-reason */}
+            {isSeparated && (person as any).separatedReason && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
+                {(person as any).separatedReason}
+              </span>
+            )}
+            {/* Auto-archive badge */}
+            {isAutoArchived && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-200 text-red-700">
+                🗄 Auto-Archived
+              </span>
+            )}
+            {/* Years until archive countdown */}
+            {isSeparated && !isAutoArchived && (person as any).dateOfSeparation && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                🗄 Archive in {yearsUntilArchive((person as any).dateOfSeparation)}y
               </span>
             )}
           </div>
@@ -232,7 +476,7 @@ function PersonnelCard({ person, onClick }: { person: Personnel201; onClick: () 
         </div>
         <span className={`text-xs font-bold px-2 py-1 rounded-full flex-shrink-0 ${
           pct === 100 ? 'bg-emerald-100 text-emerald-700'
-          : pct >= 60 ? 'bg-amber-100 text-amber-700'
+          : pct >= 60  ? 'bg-amber-100 text-amber-700'
           : 'bg-red-100 text-red-700'
         }`}>{pct}%</span>
       </div>
@@ -334,20 +578,29 @@ function EditProfileModal({ person, open, onClose, onSave }: {
   person: Personnel201 | null
   open: boolean
   onClose: () => void
-  onSave: (updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) => void
+  onSave: (updates: Partial<Personnel201> & {
+    photoUrl?: string
+    inactiveReason?: string
+    separatedReason?: string
+    dateOfSeparation?: string
+  }) => void
 }) {
   const { toast }    = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [saving, setSaving]   = useState(false)
   const [preview, setPreview] = useState<string>('')
   const [photoFile, setPhotoFile] = useState<File | null>(null)
-  const [archiveAfterYears, setArchiveAfterYears] = useState<string>('')
+
+  // Status compound state
+  const [statusVal,        setStatusVal]        = useState('')
+  const [inactiveReason,   setInactiveReason]   = useState('')
+  const [separatedReason,  setSeparatedReason]  = useState('')
+  const [dateOfSeparation, setDateOfSeparation] = useState('')
+
   const [form, setForm] = useState({
-    name: '', rank: '', unit: '', status: '', contactNo: '', address: '',
+    name: '', rank: '', unit: '', contactNo: '', address: '',
     tin: '', pagIbigNo: '', philHealthNo: '', firearmSerialNo: '',
   })
-
-  const isRetired = form.status === 'Retired'
 
   useEffect(() => {
     if (person && open) {
@@ -355,7 +608,6 @@ function EditProfileModal({ person, open, onClose, onSave }: {
         name:            person.name            ?? '',
         rank:            person.rank            ?? '',
         unit:            person.unit            ?? '',
-        status:          person.status          ?? '',
         contactNo:       person.contactNo       ?? '',
         address:         person.address         ?? '',
         tin:             person.tin             ?? '',
@@ -363,9 +615,12 @@ function EditProfileModal({ person, open, onClose, onSave }: {
         philHealthNo:    person.philHealthNo    ?? '',
         firearmSerialNo: person.firearmSerialNo ?? '',
       })
+      setStatusVal((person as any).status ?? '')
+      setInactiveReason((person as any).inactiveReason ?? '')
+      setSeparatedReason((person as any).separatedReason ?? '')
+      setDateOfSeparation((person as any).dateOfSeparation ?? '')
       setPreview(person.photoUrl ?? '')
       setPhotoFile(null)
-      setArchiveAfterYears((person as any).archiveAfterYears != null ? String((person as any).archiveAfterYears) : '')
     }
   }, [person, open])
 
@@ -378,19 +633,34 @@ function EditProfileModal({ person, open, onClose, onSave }: {
     reader.readAsDataURL(file)
   }
 
+  function handleStatusChange(v: string) {
+    setStatusVal(v)
+    // Clear sub-reasons when status changes
+    if (v !== 'Inactive') setInactiveReason('')
+    if (v === 'Separated from Service') {
+      setDateOfSeparation(prev => prev || getTodayISODate())
+    } else {
+      setSeparatedReason('')
+      setDateOfSeparation('')
+    }
+  }
+
+  const hasRequiredStatusReason =
+    statusVal !== 'Inactive' && statusVal !== 'Separated from Service'
+      ? true
+      : statusVal === 'Inactive'
+        ? Boolean(inactiveReason)
+        : Boolean(separatedReason)
+
   async function submit() {
     if (!form.name.trim()) { toast.error('Name is required.'); return }
-
-    if (isRetired) {
-      if (!archiveAfterYears) {
-        toast.error('Please specify the file retention period before archiving.')
-        return
-      }
-      const years = Number(archiveAfterYears)
-      if (isNaN(years) || years <= 0) {
-        toast.error('Please enter a valid number of years (must be greater than 0).')
-        return
-      }
+    if (!statusVal) { toast.error('Please select a status.'); return }
+    if (statusVal === 'Inactive' && !inactiveReason) {
+      toast.error('Please select a reason for inactivity.')
+      return
+    }
+    if (statusVal === 'Separated from Service') {
+      if (!separatedReason) { toast.error('Please select a reason for separation.'); return }
     }
 
     setSaving(true)
@@ -416,7 +686,7 @@ function EditProfileModal({ person, open, onClose, onSave }: {
         name:            form.name.trim(),
         rank:            form.rank.trim(),
         unit:            form.unit.trim(),
-        status:          form.status.trim(),
+        status:          statusVal,
         contactNo:       form.contactNo.trim(),
         address:         form.address.trim(),
         photoUrl,
@@ -424,7 +694,9 @@ function EditProfileModal({ person, open, onClose, onSave }: {
         pagIbigNo:       form.pagIbigNo.trim()       || undefined,
         philHealthNo:    form.philHealthNo.trim()    || undefined,
         firearmSerialNo: form.firearmSerialNo.trim() || undefined,
-        archiveAfterYears: isRetired && archiveAfterYears ? Number(archiveAfterYears) : undefined,
+        inactiveReason:   statusVal === 'Inactive'               ? inactiveReason  : undefined,
+        separatedReason:  statusVal === 'Separated from Service' ? separatedReason : undefined,
+        dateOfSeparation: statusVal === 'Separated from Service' ? (dateOfSeparation || getTodayISODate()) : undefined,
       })
       toast.success('Profile updated.')
       onClose()
@@ -497,66 +769,18 @@ function EditProfileModal({ person, open, onClose, onSave }: {
             value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} disabled={saving} />
         </div>
 
-        {/* Status */}
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
-          <select className={cls} value={form.status}
-            onChange={e => {
-              setForm(f => ({ ...f, status: e.target.value }))
-              // Clear archive years when switching away from Retired
-              if (e.target.value !== 'Retired') setArchiveAfterYears('')
-            }}
-            disabled={saving}>
-            <option value="">Select status…</option>
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-            <option value="On Leave">On Leave</option>
-            <option value="Retired">Retired</option>
-            <option value="Transferred">Transferred</option>
-          </select>
-        </div>
-
-        {/* ── Archive retention — only shown when Retired ── */}
-        {isRetired && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-            <div className="flex items-start gap-2">
-              <span className="text-amber-500 text-base flex-shrink-0 mt-0.5">🗄️</span>
-              <div>
-                <p className="text-[12px] font-semibold text-amber-800 leading-snug">File Retention Period</p>
-                <p className="text-[11px] text-amber-600 mt-0.5 leading-relaxed">
-                  Specify how many years this 201 file should be kept before it is automatically moved to the Archive.
-                </p>
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-widest text-amber-700 mb-1.5">
-                Archive file after <span className="text-red-500">*</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  disabled={saving}
-                  className="w-28 px-3 py-2.5 border-[1.5px] border-amber-300 rounded-lg text-sm bg-white focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition font-semibold text-slate-800 text-center disabled:opacity-50"
-                  placeholder="e.g. 5"
-                  value={archiveAfterYears}
-                  onChange={e => setArchiveAfterYears(e.target.value)}
-                />
-                <span className="text-sm text-amber-700 font-medium">
-                  {Number(archiveAfterYears) === 1 ? 'year' : 'years'} from retirement date
-                </span>
-              </div>
-              {archiveAfterYears && Number(archiveAfterYears) > 0 && (
-                <p className="text-[11px] text-amber-600 mt-2">
-                  📅 This file will be queued for archiving{' '}
-                  <strong>{archiveAfterYears} {Number(archiveAfterYears) === 1 ? 'year' : 'years'}</strong>{' '}
-                  after the retirement date.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        {/* ── Status + Conditional Reason ── */}
+        <StatusReasonSelector
+          status={statusVal}
+          inactiveReason={inactiveReason}
+          separatedReason={separatedReason}
+          dateOfSeparation={dateOfSeparation}
+          onStatusChange={handleStatusChange}
+          onInactiveReasonChange={setInactiveReason}
+          onSeparatedReasonChange={setSeparatedReason}
+          onDateOfSeparationChange={setDateOfSeparation}
+          disabled={saving}
+        />
 
         {/* Contact No */}
         <div>
@@ -608,7 +832,7 @@ function EditProfileModal({ person, open, onClose, onSave }: {
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={saving}>
+          <Button variant="primary" onClick={submit} disabled={saving || !hasRequiredStatusReason}>
             {saving ? 'Saving…' : '💾 Save Changes'}
           </Button>
         </div>
@@ -622,7 +846,12 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
   person: Personnel201 | null
   onClose: () => void
   onUpdate: (personId: string, docId: string, status: Doc201Status, fileUrl?: string, fileSize?: string) => void
-  onProfileSave: (personId: string, updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) => void
+  onProfileSave: (personId: string, updates: Partial<Personnel201> & {
+    photoUrl?: string
+    inactiveReason?: string
+    separatedReason?: string
+    dateOfSeparation?: string
+  }) => void
 }) {
   const { toast }        = useToast()
   const [statusFilter, setStatusFilter] = useState<Doc201Status | 'ALL'>('ALL')
@@ -644,12 +873,14 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
 
   if (!person) return null
 
-  const pct       = completionPercent(person.documents)
-  const complete  = person.documents.filter(d => d.status === 'COMPLETE').length
-  const missing   = person.documents.filter(d => d.status === 'MISSING').length
-  const forUpdate = person.documents.filter(d => d.status === 'FOR_UPDATE').length
-  const expired   = person.documents.filter(d => d.status === 'EXPIRED').length
-  const isRetired = person.status === 'Retired'
+  const pct        = completionPercent(person.documents)
+  const complete   = person.documents.filter(d => d.status === 'COMPLETE').length
+  const missing    = person.documents.filter(d => d.status === 'MISSING').length
+  const forUpdate  = person.documents.filter(d => d.status === 'FOR_UPDATE').length
+  const expired    = person.documents.filter(d => d.status === 'EXPIRED').length
+  const isSeparated = person.status === 'Separated from Service'
+  const isAutoArchived = isSeparated && isSeparatedAndExpired((person as any).dateOfSeparation)
+  const badge = personnelStatusBadge(person.status ?? '')
 
   return (
     <>
@@ -677,33 +908,53 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
               {[
                 { label: 'Name',    value: `${person.rank} ${person.name}` },
                 { label: 'Unit',    value: person.unit },
-                { label: 'Status',  value: person.status ?? 'Active', isStatus: true },
                 { label: 'Contact', value: person.contactNo ?? '—' },
                 { label: 'Address', value: person.address ?? '—' },
               ].map(r => (
                 <div key={r.label} className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[9.5px] text-white/45 font-semibold uppercase tracking-wide whitespace-nowrap w-20 flex-shrink-0">{r.label}:</span>
-                  <span className={`text-[12px] font-medium truncate ${
-                    (r as any).isStatus && isRetired ? 'text-amber-300' : 'text-white'
-                  }`}>
-                    {(r as any).isStatus && isRetired ? '🏅 ' : ''}{r.value}
-                    {(r as any).isStatus && isRetired && (person as any).archiveAfterYears != null && (
-                      <span className="ml-2 text-[10px] text-amber-400/80 font-normal">
-                        (Archive after {(person as any).archiveAfterYears} {(person as any).archiveAfterYears === 1 ? 'year' : 'years'})
-                      </span>
-                    )}
-                  </span>
+                  <span className="text-[12px] font-medium truncate text-white">{r.value}</span>
                 </div>
               ))}
+
+              {/* Status row with sub-reason */}
+              <div className="flex items-center gap-2 flex-wrap mt-1">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${badge.bg} ${badge.text}`}>
+                  {badge.icon} {person.status}
+                </span>
+                {person.status === 'Inactive' && (person as any).inactiveReason && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-600 text-slate-200">
+                    {(person as any).inactiveReason}
+                  </span>
+                )}
+                {isSeparated && (person as any).separatedReason && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-900/60 text-red-300">
+                    {(person as any).separatedReason}
+                  </span>
+                )}
+                {isAutoArchived && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-800 text-red-200">
+                    🗄 Auto-Archived
+                  </span>
+                )}
+                {isSeparated && (person as any).dateOfSeparation && !isAutoArchived && (
+                  <span className="text-[10px] text-white/40 ml-1">
+                    · Archive in {yearsUntilArchive((person as any).dateOfSeparation)}y
+                  </span>
+                )}
+              </div>
             </div>
             <div className="w-px bg-white/10 self-stretch" />
             <div className="flex-1 flex flex-col gap-2 justify-center min-w-0">
               {[
-                { label: 'Serial No.',  value: person.serialNo },
-                { label: 'Firearm No.', value: person.firearmSerialNo ?? '—' },
-                { label: 'Pag-IBIG',    value: person.pagIbigNo ?? '—' },
-                { label: 'PhilHealth',  value: person.philHealthNo ?? '—' },
-                { label: 'TIN',         value: person.tin ?? '—' },
+                { label: 'Serial No.',      value: person.serialNo },
+                { label: 'Firearm No.',     value: person.firearmSerialNo ?? '—' },
+                { label: 'Pag-IBIG',        value: person.pagIbigNo ?? '—' },
+                { label: 'PhilHealth',      value: person.philHealthNo ?? '—' },
+                { label: 'TIN',             value: person.tin ?? '—' },
+                ...(isSeparated && (person as any).dateOfSeparation
+                  ? [{ label: 'Separated', value: formatDate((person as any).dateOfSeparation) }]
+                  : []),
               ].map(r => (
                 <div key={r.label} className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[9.5px] text-white/45 font-semibold uppercase tracking-wide whitespace-nowrap w-24 flex-shrink-0">{r.label}:</span>
@@ -721,6 +972,16 @@ function Checklist201Modal({ person, onClose, onUpdate, onProfileSave }: {
               </button>
             </div>
           </div>
+
+          {/* Auto-archive warning banner */}
+          {isAutoArchived && (
+            <div className="bg-red-700 px-6 py-2.5 flex items-center gap-2">
+              <span className="text-white text-sm">🗄️</span>
+              <p className="text-[12px] text-red-100 font-medium">
+                This record has exceeded the {ARCHIVE_AFTER_YEARS}-year retention period and has been <strong>automatically archived</strong>.
+              </p>
+            </div>
+          )}
 
           {/* Progress */}
           <div className="bg-slate-50 px-6 border-t border-slate-200">
@@ -846,31 +1107,41 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
 }) {
   const { toast }  = useToast()
   const [loading, setLoading] = useState(false)
-  const [archiveAfterYears, setArchiveAfterYears] = useState<string>('')
+
+  // Status compound state
+  const [statusVal,        setStatusVal]        = useState('In Service')
+  const [inactiveReason,   setInactiveReason]   = useState('')
+  const [separatedReason,  setSeparatedReason]  = useState('')
+  const [dateOfSeparation, setDateOfSeparation] = useState('')
+
   const [form, setForm] = useState({
     lastName: '', firstName: '', rank: '', serialNo: '', unit: '',
-    status: 'Active',
   })
   const f = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }))
 
-  const isRetired = form.status === 'Retired'
+  function handleStatusChange(v: string) {
+    setStatusVal(v)
+    if (v !== 'Inactive') setInactiveReason('')
+    if (v === 'Separated from Service') {
+      setDateOfSeparation(prev => prev || getTodayISODate())
+    } else {
+      setSeparatedReason('')
+      setDateOfSeparation('')
+    }
+  }
 
   async function submit() {
     if (!form.lastName || !form.firstName || !form.rank) {
       toast.error('Fill in all required fields.')
       return
     }
-
-    if (isRetired) {
-      if (!archiveAfterYears) {
-        toast.error('Please specify the file retention period before archiving.')
-        return
-      }
-      const years = Number(archiveAfterYears)
-      if (isNaN(years) || years <= 0) {
-        toast.error('Please enter a valid number of years (must be greater than 0).')
-        return
-      }
+    if (!statusVal) { toast.error('Please select a status.'); return }
+    if (statusVal === 'Inactive' && !inactiveReason) {
+      toast.error('Please select a reason for inactivity.')
+      return
+    }
+    if (statusVal === 'Separated from Service') {
+      if (!separatedReason) { toast.error('Please select a reason for separation.'); return }
     }
 
     setLoading(true)
@@ -879,26 +1150,40 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
     const colors   = ['#3b63b8','#f0b429','#8b5cf6','#10b981','#ef4444','#0891b2']
     const color    = colors[Math.floor(Math.random() * colors.length)]
 
-    const result = await createPersonnel201({
+     const result = await createPersonnel201({
       name: fullName, rank: form.rank, serialNo: form.serialNo,
       unit: form.unit, initials, avatarColor: color,
-      ...(isRetired && archiveAfterYears ? { archiveAfterYears: Number(archiveAfterYears) } : {}),
-    })
+      status: statusVal,
+      ...(statusVal === 'Inactive'               ? { inactiveReason }  : {}),
+      ...(statusVal === 'Separated from Service' ? { separatedReason, dateOfSeparation: (dateOfSeparation || getTodayISODate()) } : {}),
+    } as any)
 
     if (result) {
-      const retentionMsg = isRetired && archiveAfterYears
-        ? ` File will be archived after ${archiveAfterYears} ${Number(archiveAfterYears) === 1 ? 'year' : 'years'}.`
-        : ''
-      toast.success(`201 file for ${form.rank} ${fullName} created.${retentionMsg}`)
+      const subNote = statusVal === 'Inactive'
+        ? ` (${inactiveReason})`
+        : statusVal === 'Separated from Service'
+          ? ` (${separatedReason})`
+          : ''
+      toast.success(`201 file for ${form.rank} ${fullName} created — ${statusVal}${subNote}.`)
       onAdd(result)
-      setForm({ lastName: '', firstName: '', rank: '', serialNo: '', unit: '', status: 'Active' })
-      setArchiveAfterYears('')
+      setForm({ lastName: '', firstName: '', rank: '', serialNo: '', unit: '' })
+      setStatusVal('In Service')
+      setInactiveReason('')
+      setSeparatedReason('')
+      setDateOfSeparation('')
       onClose()
     } else {
       toast.error('Failed to create 201 file. Please try again.')
     }
     setLoading(false)
   }
+
+  const hasRequiredStatusReason =
+    statusVal !== 'Inactive' && statusVal !== 'Separated from Service'
+      ? true
+      : statusVal === 'Inactive'
+        ? Boolean(inactiveReason)
+        : Boolean(separatedReason)
 
   const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
 
@@ -945,68 +1230,18 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
             onChange={e => f('unit', e.target.value)} disabled={loading} />
         </div>
 
-        {/* Status */}
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
-          <select
-            className={cls}
-            value={form.status}
-            onChange={e => {
-              f('status', e.target.value)
-              if (e.target.value !== 'Retired') setArchiveAfterYears('')
-            }}
-            disabled={loading}
-          >
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-            <option value="On Leave">On Leave</option>
-            <option value="Retired">Retired</option>
-            <option value="Transferred">Transferred</option>
-          </select>
-        </div>
-
-        {/* ── Archive retention — only shown when Retired ── */}
-        {isRetired && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-            <div className="flex items-start gap-2">
-              <span className="text-amber-500 text-base flex-shrink-0 mt-0.5">🗄️</span>
-              <div>
-                <p className="text-[12px] font-semibold text-amber-800 leading-snug">File Retention Period</p>
-                <p className="text-[11px] text-amber-600 mt-0.5 leading-relaxed">
-                  Since this personnel is marked as <strong>Retired</strong>, specify how many years
-                  this 201 file should be kept before it is automatically moved to the Archive.
-                </p>
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-widest text-amber-700 mb-1.5">
-                Archive file after <span className="text-red-500">*</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  disabled={loading}
-                  className="w-28 px-3 py-2.5 border-[1.5px] border-amber-300 rounded-lg text-sm bg-white focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition font-semibold text-slate-800 text-center disabled:opacity-50"
-                  placeholder="e.g. 5"
-                  value={archiveAfterYears}
-                  onChange={e => setArchiveAfterYears(e.target.value)}
-                />
-                <span className="text-sm text-amber-700 font-medium">
-                  {Number(archiveAfterYears) === 1 ? 'year' : 'years'} from retirement date
-                </span>
-              </div>
-              {archiveAfterYears && Number(archiveAfterYears) > 0 && (
-                <p className="text-[11px] text-amber-600 mt-2">
-                  📅 This file will be queued for archiving{' '}
-                  <strong>{archiveAfterYears} {Number(archiveAfterYears) === 1 ? 'year' : 'years'}</strong>{' '}
-                  after the retirement date.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        {/* ── Status + Conditional Reason ── */}
+        <StatusReasonSelector
+          status={statusVal}
+          inactiveReason={inactiveReason}
+          separatedReason={separatedReason}
+          dateOfSeparation={dateOfSeparation}
+          onStatusChange={handleStatusChange}
+          onInactiveReasonChange={setInactiveReason}
+          onSeparatedReasonChange={setSeparatedReason}
+          onDateOfSeparationChange={setDateOfSeparation}
+          disabled={loading}
+        />
 
         <p className="text-xs text-slate-400 leading-relaxed">
           A blank 201 checklist (24 items, A–X) based on the PNP DPRM standard form will be created.
@@ -1019,7 +1254,7 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
         )}
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={loading}>
+          <Button variant="primary" onClick={submit} disabled={loading || !hasRequiredStatusReason}>
             {loading ? 'Creating…' : '📁 Create 201 File'}
           </Button>
         </div>
@@ -1054,6 +1289,8 @@ export default function PersonnelFilesPage() {
           setLoading(false)
           return
         }
+
+        const expiredArchivedIds = await archiveExpiredPersonnel201Records(data as any[])
 
         const withDocs = await Promise.all(
           data.map(async (p: any) => {
@@ -1097,27 +1334,36 @@ export default function PersonnelFilesPage() {
               }))
             }
 
+            const dateOfSeparation = p.date_of_separation ?? undefined
+            const effectiveStatus =
+              expiredArchivedIds.has(p.id)
+                ? 'Archived'
+                : p.status
+
             return {
               id:               p.id,
               name:             p.name,
               rank:             p.rank,
-              serialNo:         p.serial_no           ?? '',
-              unit:             p.unit                ?? '',
-              dateCreated:      p.date_created         ?? '',
-              lastUpdated:      p.last_updated         ?? '',
-              initials:         p.initials             ?? '',
-              avatarColor:      p.avatar_color         ?? '#3b63b8',
-              photoUrl:         p.photo_url            ?? undefined,
-              address:          p.address              ?? undefined,
-              contactNo:        p.contact_no           ?? undefined,
-              dateOfRetirement: p.date_of_retirement   ?? undefined,
-              status:           p.status               ?? 'Active',
-              firearmSerialNo:  p.firearm_serial_no    ?? undefined,
-              pagIbigNo:        p.pag_ibig_no          ?? undefined,
-              philHealthNo:     p.phil_health_no       ?? undefined,
-              tin:              p.tin                  ?? undefined,
-              payslipAccountNo: p.payslip_account_no   ?? undefined,
-              archiveAfterYears:p.archive_after_years  ?? undefined,
+              serialNo:         p.serial_no            ?? '',
+              unit:             p.unit                 ?? '',
+              dateCreated:      p.date_created          ?? '',
+              lastUpdated:      p.last_updated          ?? '',
+              initials:         p.initials              ?? '',
+              avatarColor:      p.avatar_color          ?? '#3b63b8',
+              photoUrl:         p.photo_url             ?? undefined,
+              address:          p.address               ?? undefined,
+              contactNo:        p.contact_no            ?? undefined,
+              dateOfRetirement: p.date_of_retirement    ?? undefined,
+              status:           effectiveStatus         ?? 'In Service',
+              // New fields
+              inactiveReason:   p.inactive_reason       ?? undefined,
+              separatedReason:  p.separated_reason      ?? undefined,
+              dateOfSeparation,
+              firearmSerialNo:  p.firearm_serial_no     ?? undefined,
+              pagIbigNo:        p.pag_ibig_no           ?? undefined,
+              philHealthNo:     p.phil_health_no        ?? undefined,
+              tin:              p.tin                   ?? undefined,
+              payslipAccountNo: p.payslip_account_no    ?? undefined,
               documents:        documentList,
             } as Personnel201
           })
@@ -1178,7 +1424,12 @@ export default function PersonnelFilesPage() {
       })
   }
 
-  function handleProfileSave(personId: string, updates: Partial<Personnel201> & { photoUrl?: string; archiveAfterYears?: number }) {
+  function handleProfileSave(personId: string, updates: Partial<Personnel201> & {
+    photoUrl?: string
+    inactiveReason?: string
+    separatedReason?: string
+    dateOfSeparation?: string
+  }) {
     setPersonnel(prev => prev.map(p => p.id !== personId ? p : { ...p, ...updates }))
 
     if (viewDisc.payload?.id === personId) {
@@ -1186,29 +1437,35 @@ export default function PersonnelFilesPage() {
     }
 
     supabase.from('personnel_201').update({
-      name:                updates.name,
-      rank:                updates.rank,
-      unit:                updates.unit,
-      status:              updates.status,
-      contact_no:          updates.contactNo,
-      address:             updates.address,
-      photo_url:           updates.photoUrl            ?? null,
-      tin:                 updates.tin                 ?? null,
-      pag_ibig_no:         updates.pagIbigNo           ?? null,
-      phil_health_no:      updates.philHealthNo        ?? null,
-      firearm_serial_no:   updates.firearmSerialNo     ?? null,
-      archive_after_years: updates.archiveAfterYears   ?? null,
+      name:               updates.name,
+      rank:               updates.rank,
+      unit:               updates.unit,
+      status:             updates.status,
+      contact_no:         updates.contactNo,
+      address:            updates.address,
+      photo_url:          updates.photoUrl          ?? null,
+      tin:                updates.tin               ?? null,
+      pag_ibig_no:        updates.pagIbigNo         ?? null,
+      phil_health_no:     updates.philHealthNo      ?? null,
+      firearm_serial_no:  updates.firearmSerialNo   ?? null,
+      // New columns — add these to your Supabase schema:
+      inactive_reason:    updates.inactiveReason    ?? null,
+      separated_reason:   updates.separatedReason   ?? null,
+      date_of_separation: updates.dateOfSeparation  ?? null,
     }).eq('id', personId).then(({ error }) => {
       if (error) console.warn('Profile update warning:', error.message)
     })
   }
 
   const allDocs   = personnel.flatMap(p => p.documents)
+  // Exclude auto-archived records from "active" stat counts
+  const activePersonnel = personnel.filter(p => p.status !== 'Archived')
+
   const statCards = [
-    { icon: '👥', value: personnel.length,                                                                label: 'Personnel Records',  bg: 'bg-blue-50',    num: 'text-blue-700'    },
+    { icon: '👥', value: activePersonnel.length,                                                          label: 'Active Records',     bg: 'bg-blue-50',    num: 'text-blue-700'    },
     { icon: '✅', value: allDocs.filter(d => d.status === 'COMPLETE').length,                             label: 'Documents Complete', bg: 'bg-emerald-50', num: 'text-emerald-700' },
     { icon: '❌', value: allDocs.filter(d => d.status === 'MISSING').length,                              label: 'Documents Missing',  bg: 'bg-red-50',     num: 'text-red-700'     },
-    { icon: '🔄', value: allDocs.filter(d => d.status === 'FOR_UPDATE' || d.status === 'EXPIRED').length, label: 'Need Attention',     bg: 'bg-amber-50',   num: 'text-amber-700'   },
+    { icon: '🗄', value: personnel.filter(p => p.status === 'Archived').length,                           label: 'Auto-Archived',      bg: 'bg-slate-50',   num: 'text-slate-600'   },
   ]
 
   return (
