@@ -2,7 +2,7 @@
 // components/ui/Modal.tsx
 // Shared modal wrapper: overlay + dialog box.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -12,9 +12,13 @@ interface ModalProps {
   title: string
   children: React.ReactNode
   width?: string   // Tailwind max-w class, e.g. 'max-w-2xl'
+  zIndex?: number
 }
 
-export function Modal({ open, onClose, title, children, width = 'max-w-2xl' }: ModalProps) {
+export function Modal({ open, onClose, title, children, width = 'max-w-2xl', zIndex = 1000 }: ModalProps) {
+  const [mounted, setMounted] = useState(open)
+  const [closing, setClosing] = useState(false)
+
   // Close on Escape
   useEffect(() => {
     if (!open) return
@@ -23,13 +27,33 @@ export function Modal({ open, onClose, title, children, width = 'max-w-2xl' }: M
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  if (!open) return null
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+    if (open) {
+      setMounted(true)
+      requestAnimationFrame(() => setClosing(false))
+    } else if (mounted) {
+      setClosing(true)
+      timeoutId = setTimeout(() => setMounted(false), 180)
+    }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [open, mounted])
+
+  if (!mounted) return null
 
   return (
     <>
       {/* Overlay */}
       <div
-        className="fixed inset-0 bg-[rgba(10,20,40,0.55)] backdrop-blur-[2px] z-[999]"
+        className={cn(
+          'fixed inset-0 bg-[rgba(10,20,40,0.55)] backdrop-blur-[2px] z-[999]',
+          closing ? 'animate-overlay-fade-out' : 'animate-overlay-fade'
+        )}
+        style={{ zIndex: zIndex - 1 }}
         onClick={onClose}
       />
 
@@ -38,9 +62,10 @@ export function Modal({ open, onClose, title, children, width = 'max-w-2xl' }: M
         className={cn(
           'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000]',
           'bg-white rounded-2xl shadow-2xl w-[95vw] max-h-[90vh] overflow-auto',
-          'animate-fade-up',
+          closing ? 'animate-modal-pop-out' : 'animate-modal-pop',
           width
         )}
+        style={{ zIndex }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
