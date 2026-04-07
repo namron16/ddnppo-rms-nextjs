@@ -191,14 +191,14 @@ function InlineFileViewerModal({
   const fi = fileInfo(fileName)
 
   return (
-    <Modal open={open} onClose={onClose} title={`Viewing: ${fileName}`} width="max-w-5xl" zIndex={3000}>
+    <Modal open={open} onClose={onClose} title={`Viewing: ${fileName}`} width="max-w-[96vw]" zIndex={3000}>
       <div className="flex flex-col" style={{ maxHeight: '85vh' }}>
-        <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-start justify-between gap-3 px-5 py-2.5 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+          <div className="flex items-start gap-2 min-w-0 flex-1">
             <span className="text-lg flex-shrink-0">{fi.icon}</span>
-            <p className="text-xs font-semibold text-slate-700 truncate max-w-md">{fileName}</p>
+            <p className="text-xs font-semibold text-slate-700 break-all leading-relaxed">{fileName}</p>
           </div>
-          <div className="flex items-center gap-1.5 ml-3">
+          <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
             <a href={fileUrl} download className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition">
               ⬇ Download
             </a>
@@ -378,8 +378,10 @@ export default function DashboardPage() {
           }}
         >
           <span className="text-sm">{depth > 0 ? '↳' : '📄'}</span>
-          <span className="text-xs font-semibold text-slate-700 flex-1 truncate">{att.fileName}</span>
-          <span className="text-[11px] text-slate-400">{att.fileSize}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-slate-700 break-all whitespace-normal leading-snug">{att.fileName}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">{att.fileSize}</p>
+          </div>
           <button
             type="button"
             className="inline-flex items-center justify-center px-2.5 py-1.5 text-xs font-semibold rounded-md bg-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition"
@@ -640,22 +642,22 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Quick Access Grid ── */}
-      <div className="max-w-5xl mx-auto w-full px-12 py-8">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="max-w-6xl mx-auto w-full px-6 md:px-12 py-8">
+        <div className="flex items-center justify-center gap-2 mb-5">
           <div className="w-0.5 h-3.5 bg-blue-600 rounded" />
           <span className="text-[10.5px] font-bold uppercase tracking-widest text-slate-400">Quick Access</span>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 max-w-[660px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-[1040px] mx-auto">
           {CARDS.map(card => (
             <button
               key={card.key}
               onClick={() => setOpenModal(card.key)}
-              className="bg-white border-[1.5px] border-slate-200 rounded-xl p-6 text-left hover:border-blue-500 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group"
+              className="bg-white/95 border-[1.5px] border-slate-200 rounded-2xl p-6 text-left min-h-[208px] hover:border-blue-500 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 group"
             >
               <span className="text-3xl mb-3.5 block">{card.icon}</span>
-              <div className="text-[15px] font-bold text-slate-800 mb-1">{card.title}</div>
-              <div className="text-[12.5px] text-slate-400 leading-snug mb-3">{card.desc}</div>
+              <div className="text-[15px] font-bold text-slate-800 mb-1.5">{card.title}</div>
+              <div className="text-[12.5px] text-slate-500 leading-snug mb-4">{card.desc}</div>
               <span className="inline-flex bg-blue-50 text-blue-600 text-[11px] font-bold px-2.5 py-1 rounded-full">VIEW</span>
             </button>
           ))}
@@ -667,7 +669,7 @@ export default function DashboardPage() {
       ══════════════════════════════════════════════ */}
 
       {/* Master Documents */}
-      <Modal open={openModal === 'master'} onClose={() => setOpenModal(null)} title="Master Documents" width="max-w-2xl">
+      <Modal open={openModal === 'master'} onClose={() => setOpenModal(null)} title="Master Documents" width="max-w-[96vw]">
         <Toolbar placeholder="Live records">
           <ToolbarSelect><option>Read-only View</option></ToolbarSelect>
         </Toolbar>
@@ -718,8 +720,10 @@ export default function DashboardPage() {
                               {attachments.map(att => (
                                 <div key={att.id} className="flex items-center gap-3 p-2 border border-slate-200 rounded-lg bg-white transition-colors duration-150 hover:border-blue-200">
                                   <span className="text-sm">📄</span>
-                                  <span className="text-xs font-semibold text-slate-700 flex-1 truncate">{att.fileName}</span>
-                                  <span className="text-[11px] text-slate-400">{att.fileSize}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-semibold text-slate-700 break-all whitespace-normal leading-snug">{att.fileName}</p>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">{att.fileSize}</p>
+                                  </div>
                                   <Button variant="ghost" size="sm" onClick={() => setViewerFile({ url: att.fileUrl, name: att.fileName })}>👁</Button>
                                 </div>
                               ))}
@@ -737,7 +741,7 @@ export default function DashboardPage() {
       </Modal>
 
       {/* Administrative Orders */}
-      <Modal open={openModal === 'so'} onClose={() => setOpenModal(null)} title="Administrative Orders" width="max-w-xl">
+      <Modal open={openModal === 'so'} onClose={() => setOpenModal(null)} title="Administrative Orders" width="max-w-[96vw]">
         {loading ? <EmptyState icon="⏳" title="Loading administrative orders..." /> : orders.length === 0 ? <EmptyState icon="📋" title="No orders found" description="No active administrative orders yet." /> : <div className="p-6 space-y-3">
           {orders.map(so => {
             const attachments = orderAttachmentsByOrder[so.id] ?? []
@@ -778,7 +782,7 @@ export default function DashboardPage() {
       </Modal>
 
       {/* 201 File */}
-      <Modal open={openModal === 'journal'} onClose={() => setOpenModal(null)} title="201 File — Police Personnel File" width="max-w-xl">
+      <Modal open={openModal === 'journal'} onClose={() => setOpenModal(null)} title="201 File — Police Personnel File" width="max-w-[96vw]">
         {loading ? <EmptyState icon="⏳" title="Loading 201 files..." /> : files201.length === 0 ? <EmptyState icon="📂" title="No filed 201 documents" description="No uploaded 201 file attachments yet." /> : <div className="p-6 space-y-3">
           {files201.map(entry => (
             <div key={entry.id} className="flex items-center gap-3 px-4 py-3.5 border-[1.5px] border-slate-200 rounded-xl hover:border-blue-200 transition">
@@ -794,7 +798,7 @@ export default function DashboardPage() {
       </Modal>
 
       {/* Classified Documents */}
-      <Modal open={openModal === 'confidential'} onClose={() => setOpenModal(null)} title="Classified Documents" width="max-w-2xl">
+      <Modal open={openModal === 'confidential'} onClose={() => setOpenModal(null)} title="Classified Documents" width="max-w-[96vw]">
         <div className="px-7 pt-5">
           <AlertWarning message="Confidential documents require per-document password authentication. All access is logged." />
         </div>
@@ -848,7 +852,7 @@ export default function DashboardPage() {
       />
 
       {/* E-Library */}
-      <Modal open={openModal === 'library'} onClose={() => setOpenModal(null)} title="E-Library" width="max-w-2xl">
+      <Modal open={openModal === 'library'} onClose={() => setOpenModal(null)} title="E-Library" width="max-w-[96vw]">
         <Toolbar placeholder="Live records">
           <ToolbarSelect><option>Read-only View</option></ToolbarSelect>
         </Toolbar>
