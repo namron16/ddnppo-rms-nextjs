@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase'
 import { AddSpecialOrderSchema, zodErrors } from '@/lib/validations'
 import type { SpecialOrder } from '@/types'
+import { FileText, Image as ImageIcon, Paperclip } from 'lucide-react'
 
 type SOWithUrl = SpecialOrder & { fileUrl?: string }
 
@@ -104,11 +105,11 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
     }`
 
   const fileIcon =
-    file?.name.endsWith('.pdf')              ? '📕'
-    : file?.name.match(/\.docx?$/i)         ? '📘'
-    : file?.name.match(/\.xlsx?$/i)         ? '📗'
-    : file?.name.match(/\.(jpg|jpeg|png|webp)$/i) ? '🖼️'
-    : '📄'
+    file?.name.endsWith('.pdf') ? <FileText size={28} className="text-red-600" />
+    : file?.name.match(/\.docx?$/i) ? <FileText size={28} className="text-blue-600" />
+    : file?.name.match(/\.xlsx?$/i) ? <FileText size={28} className="text-green-600" />
+    : file?.name.match(/\.(jpg|jpeg|png|webp)$/i) ? <ImageIcon size={28} className="text-violet-600" />
+    : <FileText size={28} className="text-slate-600" />
 
   return (
     <Modal open={open} onClose={uploading ? () => {} : resetAndClose} title="New Special Order" width="max-w-lg">
@@ -159,7 +160,7 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
         {file ? (
           <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
             <div className="flex items-center gap-3 min-w-0">
-              <span className="text-2xl flex-shrink-0">{fileIcon}</span>
+              <span className="flex-shrink-0">{fileIcon}</span>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                 <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
@@ -178,7 +179,7 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition select-none ${
               dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
             } ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
-            <div className="text-3xl mb-2">📎</div>
+            <div className="mb-2 flex justify-center text-blue-600"><Paperclip size={30} strokeWidth={2.1} /></div>
             <p className="text-sm font-medium text-slate-600 mb-1">Click to browse or drag &amp; drop</p>
             <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
           </div>
