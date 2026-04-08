@@ -4,7 +4,7 @@ import type { Personnel201, Doc201Item, Doc201Status } from '@/types'
 
 const ARCHIVE_AFTER_YEARS = 15
 
-function isSeparatedAndExpired(dateOfSeparation?: string): boolean {
+function isSeparatedAndExpired(dateOfSeparation?: string | null): boolean {
   if (!dateOfSeparation) return false
   const separated = new Date(dateOfSeparation)
   const threshold = new Date(separated)
@@ -12,29 +12,50 @@ function isSeparatedAndExpired(dateOfSeparation?: string): boolean {
   return new Date() >= threshold
 }
 
-type PersonnelArchiveCandidate = {
-  id: string
-  status?: string | null
-  dateOfSeparation?: string | null
+// ── Types for createPersonnel201 input ────────
+interface CreatePersonnel201Input {
+  name: string
+  rank: string
+  serialNo: string
+  unit: string
+  initials: string
+  avatarColor: string
+  status?: string
+  inactiveReason?: string
+  separatedReason?: string
+  dateOfSeparation?: string
 }
 
 /**
- * Persistently archives personnel records whose separation date is older than
- * the configured retention period.
+ * Scans personnel records passed in and persists Archived status
+ * for records older than ARCHIVE_AFTER_YEARS.
+ *
+ * Accepts the raw DB rows already fetched by the caller to avoid
+ * a second round-trip. Returns the set of IDs that were archived.
  */
 export async function archiveExpiredPersonnel201Records(
-  records: PersonnelArchiveCandidate[]
+  records: Array<{
+    id: string
+    status?: string | null
+    date_of_separation?: string | null
+  }>
 ): Promise<Set<string>> {
+  // Find records that should be auto-archived
   const expiredIds = records
-    .filter(record => record.status === 'Separated from Service' && isSeparatedAndExpired(record.dateOfSeparation ?? undefined))
-    .map(record => record.id)
+    .filter(
+      (r) =>
+        r.status === 'Separated from Service' &&
+        isSeparatedAndExpired(r.date_of_separation ?? undefined)
+    )
+    .map((r) => r.id)
 
   if (expiredIds.length === 0) return new Set()
 
   const today = new Date().toISOString().split('T')[0]
+
   const { error } = await supabase
     .from('personnel_201')
-    .update({ status: 'Archived', last_updated: today })
+    .update({ status: 'Archived', last_updated: today, archived: true })
     .in('id', expiredIds)
 
   if (error) {
@@ -100,15 +121,11 @@ export const CATEGORY_LABELS: Record<string, string> = {
 
 /**
  * Create a new Personnel 201 record with blank checklist documents.
+ * Now accepts status, inactiveReason, separatedReason, dateOfSeparation.
  */
-export async function createPersonnel201(input: {
-  name: string
-  rank: string
-  serialNo: string
-  unit: string
-  initials: string
-  avatarColor: string
-}): Promise<Personnel201 | null> {
+export async function createPersonnel201(
+  input: CreatePersonnel201Input
+): Promise<Personnel201 | null> {
   const today = new Date().toISOString().split('T')[0]
   const id    = `p201-${Date.now()}`
 
@@ -118,22 +135,32 @@ export async function createPersonnel201(input: {
     id: `${id}-doc-${i + 1}`,
   }))
 
-  const newRecord: Personnel201 = {
+  const effectiveStatus = input.status ?? 'In Service'
+
+  const newRecord: Personnel201 & {
+    inactiveReason?: string
+    separatedReason?: string
+    dateOfSeparation?: string
+  } = {
     id,
-    name:        input.name,
-    rank:        input.rank,
-    serialNo:    input.serialNo,
-    unit:        input.unit,
-    initials:    input.initials,
-    avatarColor: input.avatarColor,
-    dateCreated: today,
-    lastUpdated: today,
+    name:            input.name,
+    rank:            input.rank,
+    serialNo:        input.serialNo,
+    unit:            input.unit,
+    initials:        input.initials,
+    avatarColor:     input.avatarColor,
+    dateCreated:     today,
+    lastUpdated:     today,
+    status:          effectiveStatus,
+    inactiveReason:  input.inactiveReason,
+    separatedReason: input.separatedReason,
+    dateOfSeparation: input.dateOfSeparation,
     documents,
   }
 
   try {
-    // 1. Insert personnel record
-    const { error: personnelError } = await supabase.from('personnel_201').insert({
+    // Build the DB row — only include reason/date columns when relevant
+    const dbRow: Record<string, unknown> = {
       id:           newRecord.id,
       name:         newRecord.name,
       rank:         newRecord.rank,
@@ -143,14 +170,25 @@ export async function createPersonnel201(input: {
       avatar_color: newRecord.avatarColor,
       date_created: newRecord.dateCreated,
       last_updated: newRecord.lastUpdated,
-    })
+      status:       effectiveStatus,
+      // Reason fields — null when not applicable
+      inactive_reason:    effectiveStatus === 'Inactive'               ? (input.inactiveReason  ?? null) : null,
+      separated_reason:   effectiveStatus === 'Separated from Service' ? (input.separatedReason ?? null) : null,
+      date_of_separation: effectiveStatus === 'Separated from Service' ? (input.dateOfSeparation ?? today) : null,
+      archived:           false,
+    }
+
+    const { error: personnelError } = await supabase
+      .from('personnel_201')
+      .insert(dbRow)
+
     if (personnelError) {
       console.warn('Supabase insert personnel warning:', personnelError.message)
       // Return in-memory record even if DB fails
       return newRecord
     }
 
-    // 2. Insert all 24 blank checklist documents
+    // Insert all 24 blank checklist documents
     const docsToInsert = documents.map(d => ({
       id:           d.id,
       personnel_id: newRecord.id,
@@ -226,7 +264,6 @@ export async function uploadDoc201File(
     const today    = new Date().toISOString().split('T')[0]
     const fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB'
 
-    // Update status + file info in DB
     const { error: updateError } = await supabase
       .from('personnel_201_docs')
       .update({
@@ -252,7 +289,6 @@ export async function uploadDoc201File(
  */
 export async function deletePersonnel201(id: string): Promise<void> {
   try {
-    // Delete docs first (if no cascade)
     await supabase.from('personnel_201_docs').delete().eq('personnel_id', id)
     const { error } = await supabase.from('personnel_201').delete().eq('id', id)
     if (error) console.warn('deletePersonnel201 warning:', error.message)
