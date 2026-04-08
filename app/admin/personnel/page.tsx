@@ -10,6 +10,7 @@ import { SearchInput }  from '@/components/ui/SearchInput'
 import { EmptyState }   from '@/components/ui/EmptyState'
 import { Modal }        from '@/components/ui/Modal'
 import { useToast }     from '@/components/ui/Toast'
+import { FileText, Paperclip } from 'lucide-react'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import {
   createPersonnel201,
@@ -401,13 +402,13 @@ function ChecklistRow({ item, index, onUpload, onView }: {
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
           <button onClick={() => onUpload(item)}
-            className="text-[10px] font-semibold px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
-            📎 Upload
+            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
+            <Paperclip size={11} /> Upload
           </button>
           {(item as any).fileUrl && (
             <button onClick={() => onView(item)}
-              className="text-[10px] font-semibold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
-              👁 View
+              className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
+              <FileText size={11} /> View
             </button>
           )}
         </div>

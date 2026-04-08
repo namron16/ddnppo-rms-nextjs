@@ -195,7 +195,7 @@ function Breadcrumb({
                 className="flex items-center gap-1 text-[13px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg"
                 title={label}
               >
-                {fi && <span className="text-sm">{fi.icon}</span>}
+                {fi && <Paperclip size={14} className="flex-shrink-0 text-blue-600" />}
                 <span className="truncate max-w-[180px]">{label.length > 28 ? label.slice(0, 27) + '…' : label}</span>
               </span>
             ) : (
@@ -204,7 +204,7 @@ function Breadcrumb({
                 className="flex items-center gap-1 text-[13px] font-semibold text-slate-600 hover:text-blue-700 hover:bg-white border border-transparent hover:border-blue-200 px-2 py-1 rounded-lg transition-all"
                 title={`Go back to ${label}`}
               >
-                {fi && <span className="text-sm">{fi.icon}</span>}
+                {fi && <Paperclip size={14} className="flex-shrink-0 text-blue-600" />}
                 <span className="truncate max-w-[140px]">{label.length > 20 ? label.slice(0, 19) + '…' : label}</span>
               </button>
             )}
@@ -543,7 +543,7 @@ function AttachmentsTablePanel({
                           </div>
                         ) : (
                           <div className="flex items-center gap-2.5">
-                            <span className="text-base flex-shrink-0 leading-none">{fi.icon}</span>
+                            <Paperclip size={16} className="flex-shrink-0 text-blue-600" />
                             <button
                               disabled={att.archived}
                               onClick={() => !att.archived && onDrillDown(att)}

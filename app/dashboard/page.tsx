@@ -2,7 +2,7 @@
 // app/dashboard/page.tsx
 // Officer dashboard: topbar, hero, quick-access cards, 6 live read-only modals.
 
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth }   from '@/lib/auth'
 import { Modal }     from '@/components/ui/Modal'
@@ -341,6 +341,7 @@ export default function DashboardPage() {
   const [masterDocs, setMasterDocs] = useState<MasterView[]>([])
   const [orders, setOrders] = useState<OrderView[]>([])
   const [files201, setFiles201] = useState<Doc201View[]>([])
+  const [loading201, setLoading201] = useState(false)
   const [classifiedDocs, setClassifiedDocs] = useState<ClassifiedView[]>([])
   const [libraryItems, setLibraryItems] = useState<LibraryView[]>([])
   const [orgRoot, setOrgRoot] = useState<OrgNode | null>(null)
@@ -349,6 +350,7 @@ export default function DashboardPage() {
   const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null)
   const [classifiedUnlockDoc, setClassifiedUnlockDoc] = useState<ClassifiedView | null>(null)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [masterLevelFilter, setMasterLevelFilter] = useState<'ALL' | 'REGIONAL' | 'PROVINCIAL' | 'STATION'>('ALL')
   const [expandedMasterDocId, setExpandedMasterDocId] = useState<string | null>(null)
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
 
@@ -404,6 +406,49 @@ export default function DashboardPage() {
   function countOrderAttachments(nodes: AttachmentView[]): number {
     return nodes.reduce((total, att) => total + 1 + countOrderAttachments(att.children ?? []), 0)
   }
+
+  async function refresh201Data() {
+    setLoading201(true)
+    try {
+      const [{ data: people }, { data: docs }] = await Promise.all([
+        supabase.from('personnel_201').select('id,name,rank'),
+        supabase
+          .from('personnel_201_docs')
+          .select('id,personnel_id,label,status,date_updated,file_url')
+          .not('file_url', 'is', null)
+          .order('date_updated', { ascending: false }),
+      ])
+
+      const personById = new Map<string, { name: string; rank: string | null }>()
+      for (const p of people ?? []) {
+        personById.set((p as any).id, { name: (p as any).name, rank: (p as any).rank ?? null })
+      }
+
+      setFiles201(
+        (docs ?? []).map((d: any) => {
+          const person = personById.get(d.personnel_id)
+          return {
+            id: d.id,
+            label: d.label,
+            status: d.status,
+            dateUpdated: d.date_updated ?? '',
+            person: person ? `${person.rank ? `${person.rank} ` : ''}${person.name}` : 'Personnel',
+            fileUrl: d.file_url ?? undefined,
+          }
+        })
+      )
+    } catch (error) {
+      console.error('Failed to refresh 201 files:', error)
+      setFiles201([])
+    } finally {
+      setLoading201(false)
+    }
+  }
+
+  const filteredMasterDocs = useMemo(() => {
+    if (masterLevelFilter === 'ALL') return masterDocs
+    return masterDocs.filter(doc => doc.level === masterLevelFilter)
+  }, [masterDocs, masterLevelFilter])
 
   useEffect(() => {
     async function loadLiveData() {
@@ -481,13 +526,7 @@ export default function DashboardPage() {
             }))
         )
 
-        const [{ data: people }, { data: docs }, { data: orgRows }, { data: masterAtt }, { data: orderAtt }] = await Promise.all([
-          supabase.from('personnel_201').select('id,name,rank'),
-          supabase
-            .from('personnel_201_docs')
-            .select('id,personnel_id,label,status,date_updated,file_url')
-            .not('file_url', 'is', null)
-            .order('date_updated', { ascending: false }),
+        const [{ data: orgRows }, { data: masterAtt }, { data: orderAtt }] = await Promise.all([
           supabase
             .from('org_members')
             .select('id,name,rank,position,unit,initials,color,parent_id')
@@ -502,24 +541,7 @@ export default function DashboardPage() {
             .order('uploaded_at', { ascending: false }),
         ])
 
-        const personById = new Map<string, { name: string; rank: string | null }>()
-        for (const p of people ?? []) {
-          personById.set((p as any).id, { name: (p as any).name, rank: (p as any).rank ?? null })
-        }
-
-        setFiles201(
-          (docs ?? []).map((d: any) => {
-            const person = personById.get(d.personnel_id)
-            return {
-              id: d.id,
-              label: d.label,
-              status: d.status,
-              dateUpdated: d.date_updated ?? '',
-              person: person ? `${person.rank ? `${person.rank} ` : ''}${person.name}` : 'Personnel',
-              fileUrl: d.file_url ?? undefined,
-            }
-          })
-        )
+        await refresh201Data()
 
         const nextMasterAtt: Record<string, AttachmentView[]> = {}
         for (const att of masterAtt ?? []) {
@@ -593,6 +615,12 @@ export default function DashboardPage() {
 
     loadLiveData()
   }, [])
+
+  useEffect(() => {
+    if (openModal === 'journal') {
+      refresh201Data()
+    }
+  }, [openModal])
 
   function handleLogout() {
     setShowLogoutConfirm(true)
@@ -678,12 +706,17 @@ export default function DashboardPage() {
       {/* Master Documents */}
       <Modal open={openModal === 'master'} onClose={() => setOpenModal(null)} title="Master Documents" width="max-w-[96vw]">
         <Toolbar placeholder="Live records">
-          <ToolbarSelect><option>Read-only View</option></ToolbarSelect>
+          <ToolbarSelect value={masterLevelFilter} onChange={e => setMasterLevelFilter(e.target.value as typeof masterLevelFilter)}>
+            <option value="ALL">All Levels</option>
+            <option value="REGIONAL">Regional</option>
+            <option value="PROVINCIAL">Provincial</option>
+            <option value="STATION">Station</option>
+          </ToolbarSelect>
         </Toolbar>
-        {loading ? <EmptyState icon="⏳" title="Loading master documents..." /> : masterDocs.length === 0 ? <EmptyState icon="📁" title="No documents found" description="No active master documents yet." /> : <div className="overflow-x-auto">
+        {loading ? <EmptyState icon="⏳" title="Loading master documents..." /> : filteredMasterDocs.length === 0 ? <EmptyState icon="📁" title="No documents found" description={masterLevelFilter === 'ALL' ? 'No active master documents yet.' : `No ${masterLevelFilter.toLowerCase()} master documents yet.`} /> : <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <tbody>
-              {masterDocs.map(doc => {
+              {filteredMasterDocs.map(doc => {
                 const attachments = masterAttachmentsByDoc[doc.id] ?? []
                 const expanded = expandedMasterDocId === doc.id
                 return (
@@ -790,7 +823,7 @@ export default function DashboardPage() {
 
       {/* 201 File */}
       <Modal open={openModal === 'journal'} onClose={() => setOpenModal(null)} title="201 File — Police Personnel File" width="max-w-[96vw]">
-        {loading ? <EmptyState icon="⏳" title="Loading 201 files..." /> : files201.length === 0 ? <EmptyState icon="📂" title="No filed 201 documents" description="No uploaded 201 file attachments yet." /> : <div className="p-6 space-y-3">
+        {loading || loading201 ? <EmptyState icon="⏳" title="Loading 201 files..." /> : files201.length === 0 ? <EmptyState icon="📂" title="No filed 201 documents" description="No uploaded 201 file attachments yet." /> : <div className="p-6 space-y-3">
           {files201.map(entry => (
             <div key={entry.id} className="flex items-center gap-3 px-4 py-3.5 border-[1.5px] border-slate-200 rounded-xl hover:border-blue-200 transition">
               <Badge className="bg-slate-100 text-slate-700">{entry.status}</Badge>
