@@ -1,5 +1,5 @@
 'use client'
-// components/layout/Sidebar.tsx — Updated with NotificationBell + role-based nav
+// components/layout/Sidebar.tsx — Updated with ViewRequestBell for P1
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import LogoutConfirmModal from '@/components/modals/LogoutConfirmModal'
 import { AdminProfileModal } from '@/components/modals/AdminProfileModal'
 import { NotificationBell } from '@/components/ui/NotificationBell'
+import { ViewRequestBell } from '@/components/ui/ViewRequestBell'
 
 interface NavItem {
   label: string
@@ -20,7 +21,7 @@ const DOC_NAV: NavItem[] = [
   { label: 'Master Documents',      icon: '📁', href: '/admin/master' },
   { label: 'Admin Orders',          icon: '📋', href: '/admin/admin-orders' },
   { label: '201 Files',             icon: '📔', href: '/admin/personnel' },
-  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journal' },  // renamed from classified-docs
+  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journal' },
   { label: 'Organization',          icon: '🏛️', href: '/admin/organization' },
   { label: 'e-Library',             icon: '📚', href: '/admin/e-library' },
 ]
@@ -73,13 +74,9 @@ export function Sidebar() {
   function handleLogoutConfirm() {
     logout()
     setShowLogoutConfirm(false)
-    // Delay redirect to allow cookies to clear server-side
-    setTimeout(() => {
-      router.push('/login')
-    }, 100)
+    setTimeout(() => { router.push('/login') }, 100)
   }
 
-  // Role display info
   const roleInfo = user ? {
     name: user.name,
     email: `${user.role.toLowerCase()}@ddnppo.gov.ph`,
@@ -88,8 +85,11 @@ export function Sidebar() {
     avatarColor: user.avatarColor,
   } : null
 
-  // Show management nav only for privileged roles
+  // Show management nav only for PD and P1
   const canSeeAdmin = user && ['PD', 'P1'].includes(user.role)
+
+  // P1 gets the view request bell, all get notification bell
+  const isP1 = user?.role === 'P1'
 
   return (
     <>
@@ -117,6 +117,12 @@ export function Sidebar() {
                 <p className="text-white text-[11px] font-semibold truncate">{user.role}</p>
                 <p className="text-white/40 text-[10px] truncate">{user.title}</p>
               </div>
+              {/* P1-only indicator */}
+              {isP1 && (
+                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 bg-violet-500/30 text-violet-300 rounded-full border border-violet-500/30 flex-shrink-0">
+                  SUPER
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -134,7 +140,7 @@ export function Sidebar() {
         {/* Administration nav — restricted to PD, P1 */}
         {canSeeAdmin && (
           <div className="px-3 pt-3 pb-2">
-            <div className="px-3 mb-2 text-[10px] font-bold tracking-widest uppercase text-white/30">Administration</div>
+            <div className="px-3 mb-2 text-[10px] font-bold tracking-widests uppercase text-white/30">Administration</div>
             {ADMIN_NAV.map(item => (
               <NavLink key={item.href} item={item}
                 active={pathname === item.href || pendingHref === item.href}
@@ -146,7 +152,14 @@ export function Sidebar() {
         {/* User footer */}
         <div className="mt-auto px-3 py-4 border-t border-white/10">
           <div className="flex items-center gap-2 mb-1">
-            {/* Notification Bell */}
+            {/* P1 View Request Bell */}
+            {isP1 && (
+              <div className="flex-shrink-0">
+                <ViewRequestBell />
+              </div>
+            )}
+
+            {/* Standard Notification Bell */}
             <div className="flex-shrink-0">
               <NotificationBell />
             </div>
