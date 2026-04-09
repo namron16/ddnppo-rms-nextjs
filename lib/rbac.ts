@@ -9,7 +9,7 @@ import type { AdminRole } from './auth'
 // TYPES
 // ══════════════════════════════════════════════
 
-export type DocType = 'master' | 'special_order' | 'daily_journal' | 'library'
+export type DocType = 'master' | 'special_order' | 'daily_journal' | 'library' | 'classified_document'
 export type ApprovalStatus = 'pending' | 'reviewed' | 'approved' | 'rejected'
 
 export interface DocumentApproval {

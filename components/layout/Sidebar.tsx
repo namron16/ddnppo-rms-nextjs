@@ -20,7 +20,8 @@ const DOC_NAV: NavItem[] = [
   { label: 'Master Documents',      icon: '📁', href: '/admin/master' },
   { label: 'Admin Orders',          icon: '📋', href: '/admin/admin-orders' },
   { label: '201 Files',             icon: '📔', href: '/admin/personnel' },
-  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journal' },  // renamed from classified-docs
+  { label: 'Classified Documents',         icon: '🛡️', href: '/admin/classified-documents' },  // renamed from classified-docs
+  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journals' },  // renamed from classified-docs
   { label: 'Organization',          icon: '🏛️', href: '/admin/organization' },
   { label: 'e-Library',             icon: '📚', href: '/admin/e-library' },
 ]

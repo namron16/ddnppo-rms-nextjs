@@ -113,7 +113,7 @@ function UnlockModal({ doc, open, onClose, onUnlocked }: {
 }
 
 // ── Main Page ─────────────────────────────────
-export default function DailyJournalPage() {
+export default function ClassifiedDocumentsPage() {
   const { toast } = useToast()
   const { user }  = useAuth()
 
@@ -204,7 +204,7 @@ export default function DailyJournalPage() {
 
   return (
     <>
-      <PageHeader title="Daily Journal" />
+      <PageHeader title="Classified Documents" />
 
       <div className="p-8 space-y-5">
 
@@ -214,7 +214,7 @@ export default function DailyJournalPage() {
             <div className="flex items-center gap-2 px-5 py-3 border-b border-amber-200 bg-amber-100">
               <span>📋</span>
               <p className="text-sm font-bold text-amber-800">
-                {pendingApprovals.length} Daily Journal Entr{pendingApprovals.length === 1 ? 'y' : 'ies'} Awaiting Your Action
+                {pendingApprovals.length} Classified Document{pendingApprovals.length === 1 ? '' : 's'} Awaiting Your Action
               </p>
             </div>
             <div className="divide-y divide-amber-100">
@@ -246,18 +246,18 @@ export default function DailyJournalPage() {
 
         <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-            <h2 className="text-base font-bold text-slate-800">Daily Journal Entries</h2>
+            <h2 className="text-base font-bold text-slate-800">Classified Documents Entries</h2>
             {canUpload && (
               <Button variant="primary" size="sm" onClick={newModal.open}>+ Add Entry</Button>
             )}
           </div>
 
           <div className="px-6 pt-4 pb-2">
-            <AlertWarning message="Daily Journal entries require per-document password authentication. All access is logged." />
+            <AlertWarning message="Classified Documents use a require per-document password authentication. All access is logged." />
           </div>
 
           <div className="px-6 py-3 bg-slate-50 border-b border-slate-100">
-            <SearchInput value={query} onChange={setQuery} placeholder="Search daily journal entries…" className="max-w-xs" />
+            <SearchInput value={query} onChange={setQuery} placeholder="Search classified documents…" className="max-w-xs" />
           </div>
 
           {loading ? (
@@ -265,7 +265,7 @@ export default function DailyJournalPage() {
               <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : filtered.length === 0 ? (
-            <EmptyState icon="📒" title="No journal entries found" description="Add your first daily journal entry." />
+            <EmptyState icon="📒" title="No classified documents found" description="Add your first classified document entry." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
@@ -282,7 +282,7 @@ export default function DailyJournalPage() {
                       <td className="px-4 py-3.5">
                         <BlurredDocumentGuard
                           documentId={doc.id}
-                          documentType="daily_journal"
+                          documentType="classified_document"
                           canView={doc.canView ?? isPrivileged}
                         >
                           <span className="mr-2">📒</span>
@@ -359,7 +359,7 @@ export default function DailyJournalPage() {
 
       <ConfirmDialog
         open={archiveDisc.isOpen}
-        title="Archive Daily Journal Entry"
+        title="Archive Classified Document Entry"
         message={`Archive "${archiveDisc.payload?.title}"?`}
         confirmLabel="Archive"
         variant="primary"
