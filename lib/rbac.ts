@@ -109,6 +109,32 @@ export async function setDocumentVisibility(
   // Filter to valid viewer roles only (P2–P10)
   const validAdmins = selectedAdmins.filter(a => VIEWER_ROLES.includes(a))
 
+  // Master documents use tagged_admin_access as the baseline source of truth.
+  if (documentType === 'master') {
+    const { error } = await supabase
+      .from('master_documents')
+      .update({ tagged_admin_access: validAdmins.length > 0 ? validAdmins : null })
+      .eq('id', documentId)
+
+    if (error) {
+      console.error('setDocumentVisibility master update error:', error.message)
+      return false
+    }
+
+    await supabase.from('visibility_audit_log').insert({
+      document_id: documentId,
+      document_type: documentType,
+      document_title: documentTitle,
+      tagged_by: taggedBy,
+      tagged_roles: validAdmins,
+      action: 'set',
+    }).then(({ error: auditError }) => {
+      if (auditError) console.warn('visibility_audit_log warn:', auditError.message)
+    })
+
+    return true
+  }
+
   // Wipe existing visibility records for this doc
   await supabase
     .from('document_visibility')
@@ -183,6 +209,7 @@ export async function canAdminViewDocument(
 
   // Temporary grants (from request approvals) expire after 24 hours.
   const isTemporaryGrant = !!(data as any).granted_at && !!(data as any).granted_by
+  if (documentType === 'master' && !isTemporaryGrant) return false
   if (!isTemporaryGrant) return true
 
   if (isWithin24Hours((data as any).granted_at)) return true
@@ -214,13 +241,49 @@ export async function getBatchVisibility(
 
   if (documentIds.length === 0) return new Set()
 
+  if (documentType === 'master') {
+    const allowed = new Set<string>()
+
+    const [{ data: masters }, { data: tempRows, error: tempError }] = await Promise.all([
+      supabase
+        .from('master_documents')
+        .select('id, tagged_admin_access')
+        .in('id', documentIds),
+      supabase
+        .from('document_visibility')
+        .select('document_id, granted_at, granted_by')
+        .in('document_id', documentIds)
+        .eq('document_type', 'master')
+        .eq('admin_id', adminId)
+        .eq('can_view', true),
+    ])
+
+    for (const row of (masters ?? []) as any[]) {
+      const taggedRoles = parseTaggedAdminAccess(row.tagged_admin_access)
+      if (taggedRoles.includes(adminId)) {
+        allowed.add(row.id)
+      }
+    }
+
+    if (!tempError) {
+      for (const row of (tempRows ?? []) as any[]) {
+        const isTemporaryGrant = !!row.granted_at && !!row.granted_by
+        if (isTemporaryGrant && isWithin24Hours(row.granted_at)) {
+          allowed.add(row.document_id)
+        }
+      }
+    }
+
+    return allowed
+  }
+
   const { data, error } = await supabase
     .from('document_visibility')
     .select('document_id, granted_at, granted_by')
-    .in('document_id',  documentIds)
+    .in('document_id', documentIds)
     .eq('document_type', documentType)
-    .eq('admin_id',      adminId)
-    .eq('can_view',      true)
+    .eq('admin_id', adminId)
+    .eq('can_view', true)
 
   if (error) return new Set()
 
@@ -236,11 +299,12 @@ export async function getBatchVisibility(
 }
 
 /**
- * Parse tagged admin access from comma-separated string to array.
+ * Parse tagged admin access into an AdminRole array.
  */
-export function parseTaggedAdminAccess(csvString: string | null | undefined): AdminRole[] {
-  if (!csvString) return []
-  return csvString
+export function parseTaggedAdminAccess(tagged: AdminRole[] | string | null | undefined): AdminRole[] {
+  if (!tagged) return []
+  if (Array.isArray(tagged)) return tagged.filter(s => !!s) as AdminRole[]
+  return tagged
     .split(',')
     .map(s => s.trim() as AdminRole)
     .filter(s => s.length > 0)
@@ -272,7 +336,7 @@ export async function getDocumentTaggedRoles(
       .maybeSingle()
     
     if (error || !data) return []
-    return parseTaggedAdminAccess(data.tagged_admin_access)
+    return parseTaggedAdminAccess(data.tagged_admin_access as AdminRole[] | string | null | undefined)
   }
 
   // For other document types, fall back to visibility table

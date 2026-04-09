@@ -11,8 +11,6 @@ import { supabase } from '@/lib/supabase'
 import { VisibilityTagSelector } from '@/components/ui/VisibilityTagSelector'
 import { AddDocumentSchema, zodErrors } from '@/lib/validations'
 import {
-  setDocumentVisibility,
-  createApproval,
   assertCanUpload,
 } from '@/lib/rbac'
 import { useAuth } from '@/lib/auth'
@@ -110,18 +108,10 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
         size:    fileSize,
         tag:     result.data.tag,
         fileUrl,
+        taggedAdminAccess: taggedRoles,
       }
 
       if (onAdd) await onAdd(newDoc)
-
-      // 1. Set visibility (tag-based) — P1 is the tagger
-      const visOk = await setDocumentVisibility(
-        newDocId, 'master', taggedRoles, result.data.title, 'P1'
-      )
-      if (!visOk) toast.warning('Document saved but visibility assignment had an issue.')
-
-      // 2. Create approval workflow record
-      await createApproval(newDocId, 'master', result.data.title)
 
       const tagSummary = taggedRoles.length === 0
         ? 'No P2–P10 tagged — all viewers restricted.'

@@ -15,6 +15,7 @@ import { AddDocumentModal } from '@/components/modals/AddDocumentModal'
 import { ApprovalWorkflowModal }  from '@/components/modals/ApprovalWorkflowModal'
 import { ApprovalStatusBadge } from '@/components/ui/BlurredDocumentGuard'
 import { EnhancedDocumentGuard } from '@/components/ui/EnhancedDocumentGuard'
+import { VisibilityTagSelector } from '@/components/ui/VisibilityTagSelector'
 import { UploadGuard }      from '@/components/ui/UploadGuard'
 import { useModal, useDisclosure } from '@/hooks'
 import { useToast }         from '@/components/ui/Toast'
@@ -199,13 +200,29 @@ function EditModal({ doc, open, onClose, onSave }: {
   const [tag,   setTag]   = useState('COMPLIANCE')
   const [date,  setDate]  = useState('')
   const [type,  setType]  = useState('PDF')
+  const [taggedRoles, setTaggedRoles] = useState<AdminRole[]>([])
   useMemo(() => {
-    if (doc) { setTitle(doc.title); setLevel(doc.level); setTag(doc.tag); setDate(doc.date); setType(doc.type) }
+    if (doc) {
+      setTitle(doc.title)
+      setLevel(doc.level)
+      setTag(doc.tag)
+      setDate(doc.date)
+      setType(doc.type)
+      setTaggedRoles((doc.taggedRoles ?? doc.taggedAdminAccess ?? []) as AdminRole[])
+    }
   }, [doc])
   function submit() {
     if (!title.trim()) { toast.error('Title is required.'); return }
     if (!doc) return
-    onSave({ ...doc, title: title.trim(), level, tag, date, type })
+    onSave({
+      ...doc,
+      title: title.trim(),
+      level,
+      tag,
+      date,
+      type,
+      taggedAdminAccess: taggedRoles,
+    })
   }
   const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
   return (
@@ -249,6 +266,12 @@ function EditModal({ doc, open, onClose, onSave }: {
             </select>
           </div>
         </div>
+
+        <VisibilityTagSelector
+          selected={taggedRoles}
+          onChange={setTaggedRoles}
+        />
+
         <div className="flex justify-end gap-2.5">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button variant="primary" onClick={submit}>💾 Save</Button>
@@ -367,7 +390,12 @@ export default function MasterPage() {
   async function handleAdd(newDoc: DocWithUrl) {
     await addMasterDocument(newDoc)
     await createApproval(newDoc.id, 'master', newDoc.title)
-    const enriched: DocEnriched = { ...newDoc, approval: null, canView: true, taggedRoles: [] }
+    const enriched: DocEnriched = {
+      ...newDoc,
+      approval: null,
+      canView: true,
+      taggedRoles: (newDoc.taggedAdminAccess ?? []) as AdminRole[],
+    }
     setDocuments(prev => [...prev, enriched])
     setAttachmentsMap(prev => { const next = new Map(prev); next.set(newDoc.id, []); return next })
     setSelection(enriched)
@@ -375,8 +403,21 @@ export default function MasterPage() {
 
   async function handleSave(updated: DocWithUrl) {
     await updateMasterDocument(updated)
-    setDocuments(prev => prev.map(d => d.id === updated.id ? { ...d, ...updated } : d))
-    if (selection?.id === updated.id) setSelection(prev => prev ? { ...prev, ...updated } : prev)
+    setDocuments(prev => prev.map(d => d.id === updated.id
+      ? {
+          ...d,
+          ...updated,
+          taggedRoles: (updated.taggedAdminAccess ?? []) as AdminRole[],
+        }
+      : d
+    ))
+    if (selection?.id === updated.id) {
+      setSelection(prev => prev ? {
+        ...prev,
+        ...updated,
+        taggedRoles: (updated.taggedAdminAccess ?? []) as AdminRole[],
+      } : prev)
+    }
     toast.success('Document updated.')
     editModal.close()
   }
