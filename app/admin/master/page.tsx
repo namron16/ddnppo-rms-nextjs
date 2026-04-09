@@ -28,7 +28,7 @@ import {
 } from '@/lib/data'
 import {
   getApproval, getPendingApprovals, getBatchVisibility,
-  getDocumentVisibility, canAdminViewDocument,
+  getDocumentTaggedRoles, canAdminViewDocument,
   createApproval, reviewByDPDAorDPDO, finalApproveByPD,
   type DocumentApproval, type DocType,
 } from '@/lib/rbac'
@@ -323,7 +323,7 @@ export default function MasterPage() {
           activeDocs.map(async (doc: DocWithUrl) => {
             const approval = await getApproval(doc.id, 'master')
             const canView  = isPrivileged ? true : visibleIds.has(doc.id)
-            const taggedRoles = isP1 ? await getDocumentVisibility(doc.id, 'master') : []
+            const taggedRoles = isP1 ? await getDocumentTaggedRoles(doc.id, 'master') : []
             return { ...doc, approval, canView, taggedRoles }
           })
         )
