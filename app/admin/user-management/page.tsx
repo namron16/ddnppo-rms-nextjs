@@ -161,14 +161,13 @@ export default function UserManagementPage() {
   const [recentlyUpdated, setRecentlyUpdated] = useState<Set<string>>(new Set())
 
   // Document access requests
-  const [docAccessRequests, setDocAccessRequests] = useState<DocumentAccessRequest[]>([])
   const [docAccessRequests, setDocAccessRequests] = useState<DocumentViewRequest[]>([])
   const [loadingDocAccess, setLoadingDocAccess] = useState(true)
   const [processingDocReq, setProcessingDocReq] = useState<string | null>(null)
 
   const rejectDisc  = useDisclosure<AccessRequest>()
   const approveDisc = useDisclosure<AccessRequest>()
-  const rejectDocDisc = useDisclosure<DocumentAccessRequest>()
+  const rejectDocDisc = useDisclosure<DocumentViewRequest>()
   const highlightTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const { query, setQuery, filtered } = useSearch(
