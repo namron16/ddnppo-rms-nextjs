@@ -21,8 +21,16 @@ const DOC_NAV: NavItem[] = [
   { label: 'Master Documents',      icon: '📁', href: '/admin/master' },
   { label: 'Admin Orders',          icon: '📋', href: '/admin/admin-orders' },
   { label: '201 Files',             icon: '📔', href: '/admin/personnel' },
+  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journals' },  // renamed from classified-docs
+  { label: 'Organization',          icon: '🏛️', href: '/admin/organization' },
+  { label: 'e-Library',             icon: '📚', href: '/admin/e-library' },
+]
+const P2_NAV: NavItem[] = [
+  { label: 'Master Documents',      icon: '📁', href: '/admin/master' },
+  { label: 'Admin Orders',          icon: '📋', href: '/admin/admin-orders' },
+  { label: '201 Files',             icon: '📔', href: '/admin/personnel' },
   { label: 'Classified Documents',  icon: '🛡️', href: '/admin/classified-documents' },  // renamed from classified-docs
-  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journal' },  // renamed from classified-docs
+  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journals' },  // renamed from classified-docs
   { label: 'Organization',          icon: '🏛️', href: '/admin/organization' },
   { label: 'e-Library',             icon: '📚', href: '/admin/e-library' },
 ]
@@ -88,7 +96,7 @@ export function Sidebar() {
 
   // Show management nav only for PD and P1
   const canSeeAdmin = user && ['PD', 'P1'].includes(user.role)
-
+  const canSeeP2 = user?.role === 'P2';
   // P1 gets the view request bell, all get notification bell
   const isP1 = user?.role === 'P1'
 
@@ -131,7 +139,11 @@ export function Sidebar() {
         {/* Documents nav */}
         <div className="px-3 pt-5 pb-2">
           <div className="px-3 mb-2 text-[10px] font-bold tracking-widest uppercase text-white/30">Documents</div>
-          {DOC_NAV.map(item => (
+          {canSeeP2 ? P2_NAV.map(item => (
+            <NavLink key={item.href} item={item}
+              active={pathname === item.href || pendingHref === item.href}
+              onNavigate={setPendingHref} />
+          )) : DOC_NAV.map(item => (
             <NavLink key={item.href} item={item}
               active={pathname === item.href || pendingHref === item.href}
               onNavigate={setPendingHref} />
