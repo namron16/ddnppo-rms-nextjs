@@ -1,6 +1,6 @@
 'use client'
-// app/admin/master/page.tsx
-// Enhanced with Nested Attachment / Branching File System
+// app/admin/master/page.tsx  — v2
+// P1-only uploads, tag-based visibility for P2–P10
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { PageHeader }       from '@/components/ui/PageHeader'
@@ -12,67 +12,61 @@ import { EmptyState }       from '@/components/ui/EmptyState'
 import { ToolbarSelect }    from '@/components/ui/Toolbar'
 import { Modal }            from '@/components/ui/Modal'
 import { AddDocumentModal } from '@/components/modals/AddDocumentModal'
+import { ApprovalWorkflowModal }  from '@/components/modals/ApprovalWorkflowModal'
+import { BlurredDocumentGuard, ApprovalStatusBadge } from '@/components/ui/BlurredDocumentGuard'
+import { UploadGuard }      from '@/components/ui/UploadGuard'
 import { useModal, useDisclosure } from '@/hooks'
 import { useToast }         from '@/components/ui/Toast'
+import { useAuth }          from '@/lib/auth'
 import { levelBadgeClass }  from '@/lib/utils'
 import { supabase }         from '@/lib/supabase'
-import { FileText, Paperclip } from 'lucide-react'
+import { FileText, Paperclip, Lock, ShieldCheck } from 'lucide-react'
 import {
-  getMasterDocuments,
-  addMasterDocument,
-  updateMasterDocument,
-  archiveMasterDocument,
-  addArchivedDoc,
-  getArchivedDocs,
+  getMasterDocuments, addMasterDocument, updateMasterDocument,
+  archiveMasterDocument, addArchivedDoc, getArchivedDocs,
 } from '@/lib/data'
+import {
+  getApproval, getPendingApprovals, getBatchVisibility,
+  getDocumentVisibility, canAdminViewDocument,
+  createApproval, reviewByDPDAorDPDO, finalApproveByPD,
+  type DocumentApproval, type DocType,
+} from '@/lib/rbac'
+import {
+  canUploadDocuments, canReviewDocuments, canFinalApprove,
+  hasFullDocumentAccess, ROLE_META,
+} from '@/lib/permissions'
 import type { MasterDocument, DocLevel } from '@/types'
+import type { AdminRole } from '@/lib/auth'
 
-// ── Types ──────────────────────────────────────────────────────────────────
 type DocWithUrl = MasterDocument & { fileUrl?: string }
-
-export interface DocAttachment {
-  id: string
-  document_id: string
-  parent_attachment_id: string | null
-  file_name: string
-  file_url: string
-  file_size: string
-  file_type: string
-  uploaded_at: string
-  uploaded_by: string
-  archived: boolean
+type DocEnriched = DocWithUrl & {
+  approval?: DocumentApproval | null
+  canView?: boolean
+  taggedRoles?: AdminRole[]
 }
 
-type NavEntry =
-  | { kind: 'doc';        doc: DocWithUrl }
-  | { kind: 'attachment'; att: DocAttachment }
+// ── Attachment types (same as before) ─────────
+export interface DocAttachment {
+  id: string; document_id: string; parent_attachment_id: string | null
+  file_name: string; file_url: string; file_size: string
+  file_type: string; uploaded_at: string; uploaded_by: string; archived: boolean
+}
 
-type Selection = { kind: 'doc'; doc: DocWithUrl }
-
-// ── Supabase helpers ───────────────────────────────────────────────────────
 function normaliseAttachment(row: any): DocAttachment {
   return {
-    id:                   row.id,
-    document_id:          row.document_id,
+    id: row.id, document_id: row.document_id,
     parent_attachment_id: row.parent_attachment_id ?? null,
-    file_name:            row.file_name,
-    file_url:             row.file_url,
-    file_size:            row.file_size,
-    file_type:            row.file_type,
-    uploaded_at:          row.uploaded_at,
-    uploaded_by:          row.uploaded_by,
-    archived:             row.archived === true,
+    file_name: row.file_name, file_url: row.file_url, file_size: row.file_size,
+    file_type: row.file_type, uploaded_at: row.uploaded_at,
+    uploaded_by: row.uploaded_by, archived: row.archived === true,
   }
 }
 
-async function dbAddAttachment(
-  att: Omit<DocAttachment, 'uploaded_at'>
-): Promise<DocAttachment | null> {
+async function dbAddAttachment(att: Omit<DocAttachment, 'uploaded_at'>): Promise<DocAttachment | null> {
   const { data, error } = await supabase
     .from('master_document_attachments')
     .insert({ ...att, archived: false, uploaded_at: new Date().toISOString() })
-    .select()
-    .single()
+    .select().single()
   if (error) { console.error('addAttachment error:', error.message); return null }
   return normaliseAttachment(data)
 }
@@ -80,53 +74,37 @@ async function dbAddAttachment(
 async function dbArchiveAttachment(id: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('master_document_attachments')
-    .update({ archived: true })
-    .eq('id', id)
-    .select('id, archived')
-    .single()
-  if (error) { console.error('archiveAttachment DB error:', error.message); return false }
+    .update({ archived: true }).eq('id', id)
+    .select('id, archived').single()
+  if (error) { console.error('archiveAttachment error:', error.message); return false }
   return data?.archived === true
 }
 
 async function dbRestoreAttachment(id: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('master_document_attachments')
-    .update({ archived: false })
-    .eq('id', id)
-    .select('id, archived')
-    .single()
-  if (error) { console.error('restoreAttachment DB error:', error.message); return false }
+    .update({ archived: false }).eq('id', id)
+    .select('id, archived').single()
+  if (error) { console.error('restoreAttachment error:', error.message); return false }
   return data?.archived === false
 }
 
-// ── File-type helpers ──────────────────────────────────────────────────────
 function fileInfo(name: string) {
   if (name.match(/\.pdf$/i))
-    return { icon: '📕', label: 'PDF',  color: 'text-red-600',    bg: 'bg-red-50',    border: 'border-red-200',    badgeCls: 'bg-red-100 text-red-700'      }
+    return { icon: '📕', label: 'PDF',  badgeCls: 'bg-red-100 text-red-700' }
   if (name.match(/\.docx?$/i))
-    return { icon: '📘', label: 'DOCX', color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200',   badgeCls: 'bg-blue-100 text-blue-700'    }
+    return { icon: '📘', label: 'DOCX', badgeCls: 'bg-blue-100 text-blue-700' }
   if (name.match(/\.xlsx?$/i))
-    return { icon: '📗', label: 'XLSX', color: 'text-green-600',  bg: 'bg-green-50',  border: 'border-green-200',  badgeCls: 'bg-green-100 text-green-700'  }
+    return { icon: '📗', label: 'XLSX', badgeCls: 'bg-green-100 text-green-700' }
   if (name.match(/\.(jpg|jpeg|png|webp)$/i))
-    return { icon: '🖼️', label: 'IMG',  color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200', badgeCls: 'bg-violet-100 text-violet-700' }
-  return   { icon: '📄', label: 'FILE', color: 'text-slate-600',  bg: 'bg-slate-50',  border: 'border-slate-200',  badgeCls: 'bg-slate-100 text-slate-600'  }
+    return { icon: '🖼️', label: 'IMG',  badgeCls: 'bg-violet-100 text-violet-700' }
+  return { icon: '📄', label: 'FILE', badgeCls: 'bg-slate-100 text-slate-600' }
 }
 
-// ── Flatten doc tree ───────────────────────────────────────────────────────
-interface FlatNode { doc: DocWithUrl; depth: number }
-function flattenDocs(docs: DocWithUrl[], depth = 0): FlatNode[] {
-  return docs.flatMap(doc => [
-    { doc, depth },
-    ...(doc.children ? flattenDocs(doc.children as DocWithUrl[], depth + 1) : []),
-  ])
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// Inline File Viewer Modal
-// ══════════════════════════════════════════════════════════════════════════
-function InlineFileViewerModal({
-  fileUrl, fileName, open, onClose,
-}: { fileUrl: string; fileName: string; open: boolean; onClose: () => void }) {
+// ── Inline File Viewer ─────────────────────────
+function InlineFileViewerModal({ fileUrl, fileName, open, onClose }: {
+  fileUrl: string; fileName: string; open: boolean; onClose: () => void
+}) {
   const isPDF   = !!fileUrl.match(/\.pdf(\?|$)/i)
   const isImage = !!fileUrl.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)
   const fi      = fileInfo(fileName)
@@ -139,7 +117,7 @@ function InlineFileViewerModal({
             <p className="text-xs font-semibold text-slate-700 truncate max-w-sm">{fileName}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-            <a href={fileUrl} download className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
+            <a href={fileUrl} download className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition">
               ⬇ Download
             </a>
             <Button variant="outline" size="sm" onClick={onClose}>✕ Close</Button>
@@ -156,9 +134,9 @@ function InlineFileViewerModal({
             <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
               <span className="text-6xl mb-4">{fi.icon}</span>
               <p className="text-sm font-semibold text-slate-700 mb-1 break-all">{fileName}</p>
-              <p className="text-xs text-slate-400 mb-5 max-w-xs">Preview not available. Download to view the file.</p>
+              <p className="text-xs text-slate-400 mb-5 max-w-xs">Preview not available. Download to view.</p>
               <a href={fileUrl} download className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition">
-                ⬇ Download to view
+                ⬇ Download
               </a>
             </div>
           )}
@@ -168,15 +146,13 @@ function InlineFileViewerModal({
   )
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// Forward Modal
-// ══════════════════════════════════════════════════════════════════════════
-function ForwardModal({ doc, open, onClose }: { doc: DocWithUrl | null; open: boolean; onClose: () => void }) {
+// ── Forward Modal ──────────────────────────────
+function ForwardModal({ doc, open, onClose }: { doc: DocEnriched | null; open: boolean; onClose: () => void }) {
   const { toast } = useToast()
   const [recipient, setRecipient] = useState('')
-  const [remarks,   setRemarks]   = useState('')
+  const [remarks, setRemarks] = useState('')
   function submit() {
-    if (!recipient) { toast.error('Please select a recipient.'); return }
+    if (!recipient) { toast.error('Select a recipient.'); return }
     toast.success(`Document forwarded to ${recipient}.`)
     setRecipient(''); setRemarks(''); onClose()
   }
@@ -199,10 +175,10 @@ function ForwardModal({ doc, open, onClose }: { doc: DocWithUrl | null; open: bo
           </select>
         </div>
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Remarks / Instructions</label>
-          <textarea rows={3} className={`${cls} resize-none`} placeholder="Add any instructions or remarks…" value={remarks} onChange={e => setRemarks(e.target.value)} />
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Remarks</label>
+          <textarea rows={3} className={`${cls} resize-none`} value={remarks} onChange={e => setRemarks(e.target.value)} />
         </div>
-        <div className="flex justify-end gap-2.5 pt-1">
+        <div className="flex justify-end gap-2.5">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button variant="primary" onClick={submit}>➡ Forward</Button>
         </div>
@@ -211,11 +187,9 @@ function ForwardModal({ doc, open, onClose }: { doc: DocWithUrl | null; open: bo
   )
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// Edit Modal
-// ══════════════════════════════════════════════════════════════════════════
+// ── Edit Modal ─────────────────────────────────
 function EditModal({ doc, open, onClose, onSave }: {
-  doc: DocWithUrl | null; open: boolean; onClose: () => void
+  doc: DocEnriched | null; open: boolean; onClose: () => void
   onSave: (updated: DocWithUrl) => void
 }) {
   const { toast } = useToast()
@@ -237,7 +211,7 @@ function EditModal({ doc, open, onClose, onSave }: {
     <Modal open={open} onClose={onClose} title="Edit Document" width="max-w-lg">
       <div className="p-6 space-y-4">
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Document Title <span className="text-red-500">*</span></label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Title <span className="text-red-500">*</span></label>
           <input className={cls} value={title} onChange={e => setTitle(e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -250,7 +224,7 @@ function EditModal({ doc, open, onClose, onSave }: {
             </select>
           </div>
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Tag</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-widests text-slate-500 mb-1.5">Tag</label>
             <select className={cls} value={tag} onChange={e => setTag(e.target.value)}>
               <option value="COMPLIANCE">Compliance</option>
               <option value="DIRECTIVE">Directive</option>
@@ -261,11 +235,11 @@ function EditModal({ doc, open, onClose, onSave }: {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Date</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-widests text-slate-500 mb-1.5">Date</label>
             <input type="date" className={cls} value={date} onChange={e => setDate(e.target.value)} />
           </div>
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">File Type</label>
+            <label className="block text-[11px] font-semibold uppercase tracking-widests text-slate-500 mb-1.5">File Type</label>
             <select className={cls} value={type} onChange={e => setType(e.target.value)}>
               <option value="PDF">PDF</option>
               <option value="DOCX">DOCX</option>
@@ -274,539 +248,55 @@ function EditModal({ doc, open, onClose, onSave }: {
             </select>
           </div>
         </div>
-        <div className="flex justify-end gap-2.5 pt-1">
+        <div className="flex justify-end gap-2.5">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>💾 Save Changes</Button>
+          <Button variant="primary" onClick={submit}>💾 Save</Button>
         </div>
       </div>
     </Modal>
   )
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// IMPROVED Breadcrumb Component
-// ══════════════════════════════════════════════════════════════════════════
-function Breadcrumb({
-  navStack,
-  onNavigateTo,
-}: {
-  navStack: NavEntry[]
-  onNavigateTo: (index: number) => void
-}) {
-  if (navStack.length <= 1) return null
-
-  return (
-    <div className="flex items-center gap-0 flex-wrap mb-4 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl">
-      {/* Home icon for root */}
-      <span className="text-slate-400 mr-1 text-sm">🗂</span>
-      {navStack.map((entry, i) => {
-        const label = entry.kind === 'doc' ? entry.doc.title : entry.att.file_name
-        const isLast = i === navStack.length - 1
-        const fi = entry.kind === 'attachment' ? fileInfo(entry.att.file_name) : null
-
-        return (
-          <span key={i} className="flex items-center">
-            {i > 0 && (
-              <span className="mx-1.5 text-slate-400 font-bold text-sm select-none">›</span>
-            )}
-            {isLast ? (
-              /* Current location — bold and clearly highlighted */
-              <span
-                className="flex items-center gap-1 text-[13px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg"
-                title={label}
-              >
-                {fi && <span className="text-sm">{fi.icon}</span>}
-                <span className="truncate max-w-[180px]">{label.length > 28 ? label.slice(0, 27) + '…' : label}</span>
-              </span>
-            ) : (
-              /* Ancestor — clearly clickable link */
-              <button
-                onClick={() => onNavigateTo(i)}
-                className="flex items-center gap-1 text-[13px] font-semibold text-slate-600 hover:text-blue-700 hover:bg-white border border-transparent hover:border-blue-200 px-2 py-1 rounded-lg transition-all"
-                title={`Go back to ${label}`}
-              >
-                {fi && <span className="text-sm">{fi.icon}</span>}
-                <span className="truncate max-w-[140px]">{label.length > 20 ? label.slice(0, 19) + '…' : label}</span>
-              </button>
-            )}
-          </span>
-        )
-      })}
-    </div>
-  )
+// ── Flatten doc tree ───────────────────────────
+interface FlatNode { doc: DocEnriched; depth: number }
+function flattenDocs(docs: DocEnriched[], depth = 0): FlatNode[] {
+  return docs.flatMap(doc => [
+    { doc, depth },
+    ...(doc.children ? flattenDocs(doc.children as DocEnriched[], depth + 1) : []),
+  ])
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// IMPROVED Attachments Table Panel
-// ══════════════════════════════════════════════════════════════════════════
-function AttachmentsTablePanel({
-  navStack,
-  currentEntry,
-  attachments,
-  allAttachments,
-  onUpload,
-  uploadingId,
-  onForward,
-  onEdit,
-  onArchiveDoc,
-  onViewFile,
-  onArchiveAttachment,
-  onRestoreAttachment,
-  onDrillDown,
-  onNavigateTo,
-}: {
-  navStack: NavEntry[]
-  currentEntry: NavEntry
-  attachments: DocAttachment[]
-  allAttachments: Map<string, DocAttachment[]>
-  onUpload: (parentDocId: string, parentAttId: string | null, files: FileList) => void
-  uploadingId: string | null
-  onForward: () => void
-  onEdit: () => void
-  onArchiveDoc: () => void
-  onViewFile: (fileUrl: string, fileName: string) => void
-  onArchiveAttachment: (att: DocAttachment) => void
-  onRestoreAttachment: (att: DocAttachment) => void
-  onDrillDown: (att: DocAttachment) => void
-  onNavigateTo: (index: number) => void
-}) {
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [showArchived, setShowArchived] = useState(false)
+// ══════════════════════════════════════════════
+// MAIN PAGE
+// ══════════════════════════════════════════════
 
-  const activeAttachments   = attachments.filter(a => !a.archived)
-  const archivedAttachments = attachments.filter(a =>  a.archived)
-  const displayed           = showArchived ? archivedAttachments : activeAttachments
-
-  const isDrillDown = currentEntry.kind === 'attachment'
-  const currentLabel = isDrillDown ? currentEntry.att.file_name : currentEntry.doc.title
-
-  const rootDocId = navStack[0].kind === 'doc' ? navStack[0].doc.id : ''
-  const parentAttId = isDrillDown ? currentEntry.att.id : null
-
-  function childCount(attId: string): number {
-    return (allAttachments.get(attId) ?? []).filter(a => !a.archived).length
-  }
-
-  const drillAtt = isDrillDown ? currentEntry.att : null
-  const drillFi = drillAtt ? fileInfo(drillAtt.file_name) : null
-  const typeIcon =
-    !isDrillDown
-      ? (currentEntry.doc.type === 'PDF'  ? '📕' :
-         currentEntry.doc.type === 'DOCX' ? '📘' :
-         currentEntry.doc.type === 'XLSX' ? '📗' : '🖼️')
-      : (drillFi?.icon ?? '📄')
-
-  return (
-    <div className="animate-fade-up h-full flex flex-col">
-
-      {/* ── IMPROVED Breadcrumb ── */}
-      <Breadcrumb navStack={navStack} onNavigateTo={onNavigateTo} />
-
-      {/* ── IMPROVED Back Button ── */}
-      {navStack.length > 1 && (
-        <button
-          onClick={() => onNavigateTo(navStack.length - 2)}
-          className="inline-flex items-center gap-2 mb-4 px-4 py-2 bg-white border-2 border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md self-start"
-        >
-          {/* Left arrow icon */}
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-          </svg>
-          <span>
-            Back to{' '}
-            <span className="font-bold">
-              {navStack.length >= 2
-                ? (navStack[navStack.length - 2].kind === 'doc'
-                    ? (navStack[navStack.length - 2] as { kind: 'doc'; doc: DocWithUrl }).doc.title
-                    : (navStack[navStack.length - 2] as { kind: 'attachment'; att: DocAttachment }).att.file_name)
-                : 'Documents'}
-            </span>
-          </span>
-        </button>
-      )}
-
-      {/* Title + actions */}
-      <div className="flex items-start justify-between mb-4 gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl flex-shrink-0">{typeIcon}</span>
-            <h2 className="text-lg font-extrabold text-slate-800 leading-tight truncate">{currentLabel}</h2>
-            {isDrillDown && (
-              <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 inline-flex items-center gap-1">
-                <Paperclip size={12} /> Nested File
-              </span>
-            )}
-          </div>
-          {isDrillDown && drillAtt && (
-            <div className="flex items-center gap-2 flex-wrap mt-1">
-              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
-                {drillFi?.label}
-              </span>
-              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
-                {drillAtt.file_size}
-              </span>
-              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
-                📅 {new Date(drillAtt.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
-              </span>
-            </div>
-          )}
-          {!isDrillDown && (
-            <div className="flex items-center gap-2 flex-wrap mt-1">
-              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-medium">📅 {currentEntry.doc.date}</span>
-              <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-medium">{typeIcon} {currentEntry.doc.type} · {currentEntry.doc.size}</span>
-              <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{currentEntry.doc.tag}</Badge>
-              <Badge className={levelBadgeClass(currentEntry.doc.level)}>{currentEntry.doc.level}</Badge>
-            </div>
-          )}
-        </div>
-
-        {!isDrillDown && (
-          <div className="flex gap-2 flex-shrink-0">
-            <Button variant="outline" size="sm" onClick={onForward}>➡ Forward</Button>
-            <Button variant="outline" size="sm" onClick={onEdit}>✏️ Edit</Button>
-            <Button variant="danger"  size="sm" onClick={onArchiveDoc}>🗄️ Archive</Button>
-          </div>
-        )}
-
-        {isDrillDown && drillAtt && (
-          <div className="flex gap-1.5 flex-shrink-0">
-            <button
-              onClick={() => onViewFile(drillAtt.file_url, drillAtt.file_name)}
-              className="text-xs px-2.5 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-semibold hover:bg-blue-100 transition"
-            >
-              👁 View File
-            </button>
-            <a href={drillAtt.file_url} download target="_blank" rel="noopener noreferrer"
-              className="text-xs px-2.5 py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-semibold hover:bg-slate-200 transition"
-            >
-              ⬇ Download
-            </a>
-            <button
-              onClick={() => onArchiveAttachment(drillAtt)}
-              className="text-xs px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-semibold hover:bg-amber-100 transition"
-            >
-              🗄️ Archive
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Primary file preview strip (root doc only) */}
-      {!isDrillDown && currentEntry.doc.fileUrl && (
-        <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
-          <span className="text-lg flex-shrink-0">{typeIcon}</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
-            <p className="text-xs text-blue-600 truncate">{currentEntry.doc.title}.{currentEntry.doc.type.toLowerCase()}</p>
-          </div>
-          <div className="flex gap-1.5 flex-shrink-0">
-            <a href={currentEntry.doc.fileUrl} download target="_blank" rel="noopener noreferrer"
-              className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
-              ⬇ Download
-            </a>
-            <button
-              onClick={() => onViewFile(currentEntry.doc.fileUrl!, currentEntry.doc.title)}
-              className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
-            >
-              👁 View
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Attachments card */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex-1 flex flex-col min-h-0">
-
-        {/* ── IMPROVED Toolbar with Active/Archived Tabs ── */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
-              {isDrillDown ? 'Attachments' : 'Attachments'}
-            </span>
-
-            {/* IMPROVED Toggle Buttons — look like real tabs */}
-            <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white shadow-sm">
-              <button
-                onClick={() => setShowArchived(false)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all ${
-                  !showArchived
-                    ? 'bg-blue-600 text-white shadow-inner'
-                    : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-                }`}
-              >
-                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
-                  !showArchived ? 'bg-white/30 text-white' : 'bg-slate-200 text-slate-600'
-                }`}>
-                  {activeAttachments.length}
-                </span>
-                Active
-              </button>
-              <div className="w-px h-full bg-slate-300" />
-              <button
-                onClick={() => setShowArchived(true)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all ${
-                  showArchived
-                    ? 'bg-amber-500 text-white shadow-inner'
-                    : 'bg-white text-slate-600 hover:bg-amber-50 hover:text-amber-700'
-                }`}
-              >
-                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
-                  showArchived ? 'bg-white/30 text-white' : 'bg-slate-200 text-slate-600'
-                }`}>
-                  {archivedAttachments.length}
-                </span>
-                Archived
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {uploadingId && (
-              <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
-                <span className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin block" />
-                Uploading…
-              </span>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
-              className="hidden"
-              onChange={e => {
-                if (e.target.files && e.target.files.length > 0)
-                  onUpload(rootDocId, parentAttId, e.target.files)
-                e.target.value = ''
-              }}
-            />
-            {!showArchived && (
-              <Button variant="primary" size="sm" disabled={!!uploadingId}
-                onClick={() => fileInputRef.current?.click()}>
-                + Attach file
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* Body */}
-        {displayed.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center py-14 px-6">
-            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-2xl mb-3">
-                  {showArchived ? '🗄️' : isDrillDown ? <Paperclip size={16} /> : <FileText size={16} />}
-            </div>
-            <p className="text-sm font-semibold text-slate-600 mb-1">
-              {showArchived ? 'No archived attachments' : `No ${isDrillDown ? 'child ' : ''}attachments yet`}
-            </p>
-            <p className="text-xs text-slate-400 mb-4 max-w-xs">
-              {showArchived
-                ? 'Files you archive will appear here and can be restored.'
-                : isDrillDown
-                  ? 'Click + Attach file to add child files under this attachment.'
-                  : 'Click + Attach file above to upload supporting documents.'}
-            </p>
-            {!showArchived && (
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-                + Attach file
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto min-h-0">
-            <table className="w-full border-collapse">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400">File name</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[80px]">Type</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">Size</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[130px]">Uploaded</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">By</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[90px]">Children</th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-400 w-[180px]">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayed.map(att => {
-                  const fi = fileInfo(att.file_name)
-                  const children = childCount(att.id)
-                  return (
-                    <tr key={att.id}
-                      className={`border-b border-slate-100 transition-colors group ${
-                        att.archived ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-blue-50/50'
-                      }`}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-base flex-shrink-0 leading-none">{fi.icon}</span>
-                          <button
-                            disabled={att.archived}
-                            onClick={() => !att.archived && onDrillDown(att)}
-                            className={`text-sm font-semibold truncate max-w-[240px] text-left transition ${
-                              att.archived
-                                ? 'text-slate-400 line-through cursor-default'
-                                : 'text-slate-800 hover:text-blue-600 hover:underline cursor-pointer'
-                            }`}
-                            title={att.archived ? att.file_name : `Click to explore ${att.file_name}`}
-                          >
-                            {att.file_name}
-                          </button>
-                          {!att.archived && (
-                            <span className="flex-shrink-0 text-[9px] font-bold text-slate-300 group-hover:text-blue-400 transition">
-                              ›
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${fi.badgeCls}`}>
-                          {fi.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{att.file_size}</td>
-                      <td className="px-4 py-3 text-xs text-slate-500">
-                        {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{att.uploaded_by}</td>
-                      <td className="px-4 py-3">
-                        {!att.archived && children > 0 ? (
-                          <button
-                            onClick={() => onDrillDown(att)}
-                            className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-full transition"
-                          >
-                            <Paperclip size={14} /> {children}
-                          </button>
-                        ) : (
-                          <span className="text-xs text-slate-300">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {!att.archived ? (
-                            <>
-                              <button
-                                onClick={() => onViewFile(att.file_url, att.file_name)}
-                                className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition"
-                              >
-                                👁 View
-                              </button>
-                              <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
-                                <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
-                                  ⬇
-                                </button>
-                              </a>
-                              <button
-                                onClick={() => onDrillDown(att)}
-                                className="text-[10px] font-semibold px-2 py-1 bg-violet-50 text-violet-700 border border-violet-200 rounded hover:bg-violet-100 transition"
-                                title="Open & explore this file's attachments"
-                              >
-                                📂 Open
-                              </button>
-                              <button
-                                onClick={() => onArchiveAttachment(att)}
-                                className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition"
-                              >
-                                🗄️
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => onRestoreAttachment(att)}
-                              className="text-[10px] font-semibold px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition"
-                            >
-                              ↩ Restore
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// Left-panel tree node
-// ══════════════════════════════════════════════════════════════════════════
-function DocTreeNode({
-  doc, depth, isSelected, onSelectDoc, attachmentsMap, uploadingId,
-}: {
-  doc: DocWithUrl
-  depth: number
-  isSelected: boolean
-  onSelectDoc: (doc: DocWithUrl) => void
-  attachmentsMap: Map<string, DocAttachment[]>
-  uploadingId: string | null
-}) {
-  const activeCount = (attachmentsMap.get(doc.id) ?? []).filter(a => !a.archived && !a.parent_attachment_id).length
-  const levelColor  =
-    doc.level === 'REGIONAL'   ? '#3b63b8' :
-    doc.level === 'PROVINCIAL' ? '#f59e0b' : '#10b981'
-  const indentPx = depth * 16 + 8
-  const rowWidth  = `calc(100% - ${indentPx + 8}px)`
-  return (
-    <div
-      style={{ marginLeft: indentPx, width: rowWidth }}
-      className={`flex items-center gap-1.5 pr-2 pl-2.5 py-2.5 rounded-lg mb-0.5 cursor-pointer transition ${
-        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'
-      }`}
-      onClick={() => onSelectDoc(doc)}
-    >
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isSelected ? 'opacity-70' : ''}`} style={{ background: levelColor }} />
-      <span className="flex-1 truncate text-[13px] font-medium">{doc.title}</span>
-      {activeCount > 0 && (
-        <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
-          isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
-        }`}>
-          <Paperclip size={13} /> {activeCount}
-        </span>
-      )}
-      {uploadingId === doc.id && (
-        <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin block flex-shrink-0 opacity-70" />
-      )}
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// Main Page
-// ══════════════════════════════════════════════════════════════════════════
 export default function MasterPage() {
   const { toast } = useToast()
+  const { user }  = useAuth()
 
-  const [documents,      setDocuments]      = useState<DocWithUrl[]>([])
+  const [documents,      setDocuments]      = useState<DocEnriched[]>([])
   const [query,          setQuery]          = useState('')
   const [levelFilter,    setLevel]          = useState<DocLevel | 'ALL'>('ALL')
   const [loading,        setLoading]        = useState(true)
   const [attachmentsMap, setAttachmentsMap] = useState<Map<string, DocAttachment[]>>(new Map())
-  const [selection,      setSelection]      = useState<Selection | null>(null)
+  const [selection,      setSelection]      = useState<DocEnriched | null>(null)
   const [uploadingId,    setUploadingId]    = useState<string | null>(null)
-  const [archivingAtt,   setArchivingAtt]   = useState(false)
-
-  const [navStack, setNavStack] = useState<NavEntry[]>([])
-
-  const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null)
+  const [viewerFile,     setViewerFile]     = useState<{ url: string; name: string } | null>(null)
+  const [activeApproval, setActiveApproval] = useState<DocumentApproval | null>(null)
+  const [pendingApprovals, setPending]      = useState<DocumentApproval[]>([])
 
   const archiveAttDisc = useDisclosure<DocAttachment>()
   const uploadModal    = useModal()
   const forwardModal   = useModal()
   const editModal      = useModal()
   const archiveDisc    = useDisclosure<string>()
+  const approvalModal  = useModal()
 
-  const currentEntry: NavEntry | null = navStack.length > 0 ? navStack[navStack.length - 1] : null
-
-  const currentAttachments = useMemo((): DocAttachment[] => {
-    if (!currentEntry) return []
-    if (currentEntry.kind === 'doc') {
-      return (attachmentsMap.get(currentEntry.doc.id) ?? []).filter(a => !a.parent_attachment_id)
-    } else {
-      return attachmentsMap.get(currentEntry.att.id) ?? []
-    }
-  }, [currentEntry, attachmentsMap])
+  // Role flags
+  const isP1       = user?.role === 'P1'
+  const isReviewer  = user?.role === 'DPDA' || user?.role === 'DPDO'
+  const isPD        = user?.role === 'PD'
+  const isPrivileged = user ? hasFullDocumentAccess(user.role) : false
 
   useEffect(() => {
     async function loadAll() {
@@ -819,35 +309,50 @@ export default function MasterPage() {
             .map((id: string) => id.replace('arc-md-', ''))
         )
         const activeDocs = docs.filter((d: DocWithUrl) => !archivedIds.has(d.id))
-        setDocuments(activeDocs)
 
-        const allIds = activeDocs.map((d: DocWithUrl) => d.id)
-        if (allIds.length > 0) {
-          const { data: allAtts, error } = await supabase
-            .from('master_document_attachments')
-            .select('*')
-            .in('document_id', allIds)
-            .order('uploaded_at', { ascending: true })
+        // Enrich with approvals and visibility
+        const docIds = activeDocs.map((d: DocWithUrl) => d.id)
+        let visibleIds = new Set<string>(docIds)
 
-          if (error) {
-            console.error('Failed to load attachments:', error.message)
-          } else {
-            const map = new Map<string, DocAttachment[]>()
-            for (const row of (allAtts ?? [])) {
-              const att = normaliseAttachment(row)
-              const key = att.parent_attachment_id ?? att.document_id
-              const list = map.get(key) ?? []
-              list.push(att)
-              map.set(key, list)
-            }
-            setAttachmentsMap(map)
-          }
+        if (user && !isPrivileged) {
+          visibleIds = await getBatchVisibility(user.role as AdminRole, docIds, 'master')
         }
 
-        if (activeDocs.length > 0) {
-          const firstDoc = activeDocs[0]
-          setSelection({ kind: 'doc', doc: firstDoc })
-          setNavStack([{ kind: 'doc', doc: firstDoc }])
+        const enriched: DocEnriched[] = await Promise.all(
+          activeDocs.map(async (doc: DocWithUrl) => {
+            const approval = await getApproval(doc.id, 'master')
+            const canView  = isPrivileged ? true : visibleIds.has(doc.id)
+            const taggedRoles = isP1 ? await getDocumentVisibility(doc.id, 'master') : []
+            return { ...doc, approval, canView, taggedRoles }
+          })
+        )
+        setDocuments(enriched)
+
+        // Load attachments
+        if (docIds.length > 0) {
+          const { data: allAtts } = await supabase
+            .from('master_document_attachments')
+            .select('*')
+            .in('document_id', docIds)
+            .order('uploaded_at', { ascending: true })
+
+          const map = new Map<string, DocAttachment[]>()
+          for (const row of (allAtts ?? [])) {
+            const att = normaliseAttachment(row)
+            const key = att.parent_attachment_id ?? att.document_id
+            const list = map.get(key) ?? []
+            list.push(att)
+            map.set(key, list)
+          }
+          setAttachmentsMap(map)
+        }
+
+        if (enriched.length > 0) setSelection(enriched[0])
+
+        // Pending approvals for reviewers / PD
+        if (isReviewer || isPD) {
+          const pending = await getPendingApprovals(user!.role as AdminRole)
+          setPending(pending.filter(a => a.document_type === 'master'))
         }
       } catch (err) {
         console.error('loadAll error:', err)
@@ -856,53 +361,62 @@ export default function MasterPage() {
       }
     }
     loadAll()
-  }, [])
+  }, [user, isPrivileged, isP1, isReviewer, isPD])
 
-  function handleSelectDoc(doc: DocWithUrl) {
-    setSelection({ kind: 'doc', doc })
-    setNavStack([{ kind: 'doc', doc }])
+  async function handleAdd(newDoc: DocWithUrl) {
+    await addMasterDocument(newDoc)
+    await createApproval(newDoc.id, 'master', newDoc.title)
+    const enriched: DocEnriched = { ...newDoc, approval: null, canView: true, taggedRoles: [] }
+    setDocuments(prev => [...prev, enriched])
+    setAttachmentsMap(prev => { const next = new Map(prev); next.set(newDoc.id, []); return next })
+    setSelection(enriched)
   }
 
-  function handleDrillDown(att: DocAttachment) {
-    setNavStack(prev => [...prev, { kind: 'attachment', att }])
+  async function handleSave(updated: DocWithUrl) {
+    await updateMasterDocument(updated)
+    setDocuments(prev => prev.map(d => d.id === updated.id ? { ...d, ...updated } : d))
+    if (selection?.id === updated.id) setSelection(prev => prev ? { ...prev, ...updated } : prev)
+    toast.success('Document updated.')
+    editModal.close()
   }
 
-  function handleNavigateTo(index: number) {
-    setNavStack(prev => prev.slice(0, index + 1))
+  async function handleArchiveDoc() {
+    if (!selection) return
+    const doc  = selection
+    const date = new Date().toISOString().split('T')[0]
+    await addArchivedDoc({ id: `arc-md-${doc.id}`, title: doc.title, type: 'Master Document', archivedDate: date, archivedBy: user?.role ?? 'P1' })
+    await archiveMasterDocument(doc.id)
+    setDocuments(prev => prev.filter(d => d.id !== doc.id))
+    setSelection(null)
+    toast.success('Document archived.')
+    archiveDisc.close()
   }
 
   async function handleUpload(parentDocId: string, parentAttId: string | null, files: FileList) {
+    // Backend guard: only P1 can attach files
+    if (!isP1) {
+      toast.error('Only P1 can upload attachments.')
+      return
+    }
     setUploadingId(parentAttId ?? parentDocId)
     let count = 0
     for (const file of Array.from(files)) {
-      const folder   = parentAttId ? `master-docs/attachments/${parentDocId}/nested/${parentAttId}` : `master-docs/attachments/${parentDocId}`
+      const folder = parentAttId ? `master-docs/attachments/${parentDocId}/nested/${parentAttId}` : `master-docs/attachments/${parentDocId}`
       const fileName = `${folder}/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
-      const { data: storageData, error: storageError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, file, { cacheControl: '3600', upsert: false })
+      const { data: storageData, error: storageError } = await supabase.storage.from('documents').upload(fileName, file, { cacheControl: '3600', upsert: false })
       if (storageError) { toast.error(`Failed to upload "${file.name}".`); continue }
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
-      const ext    = file.name.split('.').pop()?.toUpperCase() ?? 'FILE'
+      const ext = file.name.split('.').pop()?.toUpperCase() ?? 'FILE'
       const newAtt = await dbAddAttachment({
-        id:                   `att-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        document_id:          parentDocId,
-        parent_attachment_id: parentAttId,
-        file_name:            file.name,
-        file_url:             urlData.publicUrl,
-        file_size:            file.size < 1024 * 1024
-                                ? `${(file.size / 1024).toFixed(1)} KB`
-                                : `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        file_type:            ext,
-        uploaded_by:          'Admin',
-        archived:             false,
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        document_id: parentDocId, parent_attachment_id: parentAttId,
+        file_name: file.name, file_url: urlData.publicUrl,
+        file_size: file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+        file_type: ext, uploaded_by: user?.role ?? 'P1', archived: false,
       })
       if (newAtt) {
         const mapKey = parentAttId ?? parentDocId
-        setAttachmentsMap(prev => {
-          const next = new Map(prev)
-          next.set(mapKey, [...(next.get(mapKey) ?? []), newAtt])
-          return next
-        })
+        setAttachmentsMap(prev => { const next = new Map(prev); next.set(mapKey, [...(next.get(mapKey) ?? []), newAtt]); return next })
         count++
       }
     }
@@ -910,63 +424,19 @@ export default function MasterPage() {
     setUploadingId(null)
   }
 
-  async function handleAdd(newDoc: DocWithUrl) {
-    await addMasterDocument(newDoc)
-    setDocuments(prev => [...prev, newDoc])
-    setAttachmentsMap(prev => { const next = new Map(prev); next.set(newDoc.id, []); return next })
-    setSelection({ kind: 'doc', doc: newDoc })
-    setNavStack([{ kind: 'doc', doc: newDoc }])
-  }
-
-  async function handleSave(updated: DocWithUrl) {
-    await updateMasterDocument(updated)
-    setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d))
-    if (selection?.doc.id === updated.id) {
-      setSelection({ kind: 'doc', doc: updated })
-      setNavStack(prev => prev.map(e => e.kind === 'doc' && e.doc.id === updated.id ? { kind: 'doc', doc: updated } : e))
-    }
-    toast.success('Document updated.')
-    editModal.close()
-  }
-
-  async function handleArchiveDoc() {
-    if (!selection) return
-    const doc  = selection.doc
-    const date = new Date().toISOString().split('T')[0]
-    await addArchivedDoc({ id: `arc-md-${doc.id}`, title: doc.title, type: 'Master Document', archivedDate: date, archivedBy: 'Admin' })
-    await archiveMasterDocument(doc.id)
-    setDocuments(prev => prev.filter(d => d.id !== doc.id))
-    setSelection(null)
-    setNavStack([])
-    toast.success('Document archived.')
-    archiveDisc.close()
-  }
-
   async function handleArchiveAttachment() {
     const att = archiveAttDisc.payload
     if (!att) return
-    setArchivingAtt(true)
-    try {
-      const ok = await dbArchiveAttachment(att.id)
-      if (!ok) {
-        toast.error('Could not archive attachment — the database update failed.')
-        return
-      }
-      const mapKey = att.parent_attachment_id ?? att.document_id
-      setAttachmentsMap(prev => {
-        const next = new Map(prev)
-        const list = next.get(mapKey) ?? []
-        next.set(mapKey, list.map(a => a.id === att.id ? { ...a, archived: true } : a))
-        return next
-      })
-      toast.success(`"${att.file_name}" archived.`)
-      archiveAttDisc.close()
-      if (currentEntry?.kind === 'attachment' && currentEntry.att.id === att.id) {
-        setNavStack(prev => prev.slice(0, -1))
-      }
-    } finally {
-      setArchivingAtt(false)
-    }
+    const ok = await dbArchiveAttachment(att.id)
+    if (!ok) { toast.error('Could not archive attachment.'); return }
+    const mapKey = att.parent_attachment_id ?? att.document_id
+    setAttachmentsMap(prev => {
+      const next = new Map(prev)
+      next.set(mapKey, (next.get(mapKey) ?? []).map(a => a.id === att.id ? { ...a, archived: true } : a))
+      return next
+    })
+    toast.success(`"${att.file_name}" archived.`)
+    archiveAttDisc.close()
   }
 
   async function handleRestoreAttachment(att: DocAttachment) {
@@ -975,8 +445,7 @@ export default function MasterPage() {
     const mapKey = att.parent_attachment_id ?? att.document_id
     setAttachmentsMap(prev => {
       const next = new Map(prev)
-      const list = next.get(mapKey) ?? []
-      next.set(mapKey, list.map(a => a.id === att.id ? { ...a, archived: false } : a))
+      next.set(mapKey, (next.get(mapKey) ?? []).map(a => a.id === att.id ? { ...a, archived: false } : a))
       return next
     })
     toast.success(`"${att.file_name}" restored.`)
@@ -989,7 +458,10 @@ export default function MasterPage() {
            (levelFilter === 'ALL' || doc.level === levelFilter)
   }), [allFlat, query, levelFilter])
 
-  const activeDocForModals = selection?.doc ?? null
+  const currentAttachments = useMemo((): DocAttachment[] => {
+    if (!selection) return []
+    return (attachmentsMap.get(selection.id) ?? []).filter(a => !a.parent_attachment_id)
+  }, [selection, attachmentsMap])
 
   return (
     <>
@@ -997,23 +469,41 @@ export default function MasterPage() {
 
       <div className="p-6 flex flex-col gap-5 flex-1" style={{ height: 'calc(100vh - 56px)' }}>
 
+        {/* Pending approvals banner */}
+        {(isReviewer || isPD) && pendingApprovals.length > 0 && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl px-5 py-3.5 flex items-center gap-3">
+            <span className="text-amber-500 text-lg flex-shrink-0">📋</span>
+            <p className="text-sm text-amber-800 font-semibold flex-1">
+              {pendingApprovals.length} master document{pendingApprovals.length > 1 ? 's' : ''} awaiting your {isReviewer ? 'review' : 'final approval'}
+            </p>
+            <Button variant="primary" size="sm" onClick={() => {
+              const first = pendingApprovals[0]
+              const doc = documents.find(d => d.id === first.document_id)
+              if (doc) { setSelection(doc); setActiveApproval(first); approvalModal.open() }
+            }}>
+              Review Now
+            </Button>
+          </div>
+        )}
+
         <div className="bg-white border-[1.5px] border-slate-200 rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
 
           {/* Toolbar */}
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-slate-100 bg-slate-50 flex-shrink-0">
             <SearchInput value={query} onChange={setQuery} placeholder="Search documents…" className="max-w-xs flex-1" />
-            <ToolbarSelect
-              defaultValue="ALL"
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setLevel(e.target.value as DocLevel | 'ALL')}
-            >
+            <ToolbarSelect defaultValue="ALL" onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setLevel(e.target.value as DocLevel | 'ALL')}>
               <option value="ALL">All Levels</option>
               <option value="REGIONAL">Regional</option>
               <option value="PROVINCIAL">Provincial</option>
               <option value="STATION">Station</option>
             </ToolbarSelect>
-            <Button variant="primary" size="sm" className="ml-auto" onClick={uploadModal.open}>
-              + Upload
-            </Button>
+
+            {/* P1-only upload button */}
+            <UploadGuard showDisabled>
+              <Button variant="primary" size="sm" className="ml-auto" onClick={uploadModal.open}>
+                + Upload
+              </Button>
+            </UploadGuard>
           </div>
 
           {/* Split view */}
@@ -1025,7 +515,7 @@ export default function MasterPage() {
                 <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 leading-none">
                   Documents · {filtered.length}
                 </p>
-                <p className="text-[10px] text-slate-400 mt-1">Click to view attachments</p>
+                <p className="text-[10px] text-slate-400 mt-1">Click to view details</p>
               </div>
 
               <div className="flex-1 overflow-y-auto py-2 px-2">
@@ -1034,68 +524,310 @@ export default function MasterPage() {
                     <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : filtered.length === 0 ? (
-                  <EmptyState icon="📁" title="No documents" description="Upload your first document." />
+                  <EmptyState icon="📁" title="No documents" description="No active master documents." />
                 ) : (
-                  filtered.map(({ doc, depth }) => (
-                    <DocTreeNode
-                      key={doc.id}
-                      doc={doc}
-                      depth={depth}
-                      isSelected={selection?.doc.id === doc.id}
-                      onSelectDoc={handleSelectDoc}
-                      attachmentsMap={attachmentsMap}
-                      uploadingId={uploadingId}
-                    />
-                  ))
+                  filtered.map(({ doc, depth }) => {
+                    const activeCount = (attachmentsMap.get(doc.id) ?? []).filter(a => !a.archived && !a.parent_attachment_id).length
+                    const levelColor = doc.level === 'REGIONAL' ? '#3b63b8' : doc.level === 'PROVINCIAL' ? '#f59e0b' : '#10b981'
+                    const indentPx = depth * 16 + 8
+                    const rowWidth = `calc(100% - ${indentPx + 8}px)`
+                    return (
+                      <div
+                        key={doc.id}
+                        style={{ marginLeft: indentPx, width: rowWidth }}
+                        className={`flex items-center gap-1.5 pr-2 pl-2.5 py-2.5 rounded-lg mb-0.5 cursor-pointer transition ${
+                          selection?.id === doc.id ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'
+                        }`}
+                        onClick={() => setSelection(doc)}
+                      >
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: levelColor }} />
+                        <span className="flex-1 truncate text-[13px] font-medium">{doc.title}</span>
+
+                        {/* Visibility indicator for P1 */}
+                        {isP1 && doc.taggedRoles && doc.taggedRoles.length > 0 && (
+                          <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${selection?.id === doc.id ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-600'}`}>
+                            {doc.taggedRoles.length}
+                          </span>
+                        )}
+
+                        {/* Lock for viewers without access */}
+                        {!isPrivileged && !doc.canView && (
+                          <Lock size={12} className={selection?.id === doc.id ? 'text-white/60' : 'text-slate-400'} />
+                        )}
+
+                        {/* Approval status dot */}
+                        {doc.approval && doc.approval.status !== 'approved' && (
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            doc.approval.status === 'pending' ? 'bg-amber-400' :
+                            doc.approval.status === 'reviewed' ? 'bg-blue-400' :
+                            'bg-red-400'
+                          }`} />
+                        )}
+
+                        {activeCount > 0 && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                            selection?.id === doc.id ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            <Paperclip size={11} /> {activeCount}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })
                 )}
               </div>
 
               {/* Legend */}
               <div className="px-4 py-3 border-t border-slate-100 space-y-1.5 flex-shrink-0">
-                {[
-                  { color: '#3b63b8', label: 'Regional' },
-                  { color: '#f59e0b', label: 'Provincial' },
-                  { color: '#10b981', label: 'Station' },
-                ].map(l => (
+                {[{ color: '#3b63b8', label: 'Regional' }, { color: '#f59e0b', label: 'Provincial' }, { color: '#10b981', label: 'Station' }].map(l => (
                   <div key={l.label} className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: l.color }} />
+                    <span className="w-2 h-2 rounded-full" style={{ background: l.color }} />
                     <span className="text-[11px] text-slate-400">{l.label}</span>
                   </div>
                 ))}
                 <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-1">
-                  <span className="text-[11px] text-slate-400">📎 = top-level attachments</span>
+                  <Lock size={11} className="text-slate-400" />
+                  <span className="text-[11px] text-slate-400">Restricted access</span>
                 </div>
               </div>
             </div>
 
-            {/* Right: attachment detail with drill-down */}
+            {/* Right: detail panel */}
             <div className="flex-1 overflow-y-auto p-6">
-              {!currentEntry ? (
+              {!selection ? (
                 <div className="h-full flex items-center justify-center">
                   <EmptyState
                     icon="📄"
                     title="Select a document"
-                    description="Click any document from the list on the left to view its attachments."
-                    action={<Button variant="primary" size="sm" onClick={uploadModal.open}>+ Upload Document</Button>}
+                    description="Click any document from the list to view its details."
+                    action={
+                      isP1 ? <Button variant="primary" size="sm" onClick={uploadModal.open}>+ Upload Document</Button> : undefined
+                    }
                   />
                 </div>
               ) : (
-                <AttachmentsTablePanel
-                  navStack={navStack}
-                  currentEntry={currentEntry}
-                  attachments={currentAttachments}
-                  allAttachments={attachmentsMap}
-                  onUpload={handleUpload}
-                  uploadingId={uploadingId}
-                  onForward={forwardModal.open}
-                  onEdit={editModal.open}
-                  onArchiveDoc={() => selection && archiveDisc.open(selection.doc.title)}
-                  onViewFile={(url, name) => setViewerFile({ url, name })}
-                  onArchiveAttachment={att => archiveAttDisc.open(att)}
-                  onRestoreAttachment={handleRestoreAttachment}
-                  onDrillDown={handleDrillDown}
-                  onNavigateTo={handleNavigateTo}
-                />
+                <div className="animate-fade-up space-y-5">
+
+                  {/* Document header */}
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        {/* Visibility check for non-privileged users */}
+                        {!isPrivileged && !selection.canView ? (
+                          <h2 className="text-lg font-extrabold text-slate-400 flex items-center gap-2">
+                            <Lock size={18} className="text-slate-400" />
+                            <span style={{ filter: 'blur(5px)', userSelect: 'none' }}>Restricted Document</span>
+                          </h2>
+                        ) : (
+                          <h2 className="text-lg font-extrabold text-slate-800">{selection.title}</h2>
+                        )}
+                        <Badge className={levelBadgeClass(selection.level)}>{selection.level}</Badge>
+                        <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{selection.tag}</Badge>
+                        {selection.approval && (
+                          <ApprovalStatusBadge approval={selection.approval} compact />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500">
+                        <span className="bg-slate-100 px-2 py-0.5 rounded-full">📅 {selection.date}</span>
+                        <span className="bg-slate-100 px-2 py-0.5 rounded-full">{selection.type} · {selection.size}</span>
+                        {isP1 && selection.taggedRoles && (
+                          <span className="bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full font-semibold">
+                            🏷️ {selection.taggedRoles.length} tagged
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 flex-shrink-0 flex-wrap">
+                      {/* Full-access roles: forward + edit */}
+                      {isPrivileged && (
+                        <Button variant="outline" size="sm" onClick={forwardModal.open}>➡ Forward</Button>
+                      )}
+                      {/* P1-only: edit + archive */}
+                      {isP1 && (
+                        <>
+                          <Button variant="outline" size="sm" onClick={editModal.open}>✏️ Edit</Button>
+                          <Button variant="danger" size="sm" onClick={() => archiveDisc.open(selection.title)}>🗄️ Archive</Button>
+                        </>
+                      )}
+                      {/* Reviewers/PD: approval action */}
+                      {(isReviewer || isPD) && selection.approval?.status !== 'approved' && (
+                        <Button variant="primary" size="sm" onClick={() => {
+                          setActiveApproval(selection.approval ?? null)
+                          approvalModal.open()
+                        }}>
+                          {isReviewer ? '👁 Review' : '✅ Approve'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Primary file — only visible to authorized users */}
+                  {selection.fileUrl && (isPrivileged || selection.canView) ? (
+                    <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+                      <span className="text-lg flex-shrink-0">
+                        {selection.type === 'PDF' ? '📕' : selection.type === 'DOCX' ? '📘' : selection.type === 'XLSX' ? '📗' : '🖼️'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
+                        <p className="text-xs text-blue-600 truncate">{selection.title}.{selection.type.toLowerCase()}</p>
+                      </div>
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        <a href={selection.fileUrl} download target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
+                          ⬇ Download
+                        </a>
+                        <button
+                          onClick={() => setViewerFile({ url: selection.fileUrl!, name: selection.title })}
+                          className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
+                        >
+                          👁 View
+                        </button>
+                      </div>
+                    </div>
+                  ) : selection.fileUrl && !selection.canView && !isPrivileged ? (
+                    /* Blurred file strip for restricted users */
+                    <div className="relative overflow-hidden rounded-xl">
+                      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl"
+                        style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none' }}>
+                        <span className="text-lg">📕</span>
+                        <div>
+                          <p className="text-xs font-semibold">Restricted file</p>
+                          <p className="text-xs text-slate-500">••••••••••••.pdf</p>
+                        </div>
+                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-white/90 px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
+                          <Lock size={12} /> Restricted Access
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Visibility tagging info for P1 */}
+                  {isP1 && selection.taggedRoles !== undefined && (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold text-violet-800">🏷️ Tagged Admin Access</p>
+                        <span className="text-[11px] text-violet-600 font-medium">
+                          {selection.taggedRoles.length === 0 ? 'None tagged' : `${selection.taggedRoles.length} admins`}
+                        </span>
+                      </div>
+                      {selection.taggedRoles.length === 0 ? (
+                        <p className="text-[11px] text-violet-600">No P2–P10 tagged. All viewer roles see blurred access.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selection.taggedRoles.map(role => (
+                            <span
+                              key={role}
+                              className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                              style={{
+                                background: ROLE_META[role].color + '20',
+                                color: ROLE_META[role].color,
+                                border: `1px solid ${ROLE_META[role].color}40`,
+                              }}
+                            >
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Attachments — only shown to authorized users */}
+                  {(isPrivileged || selection.canView) ? (
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+                        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Attachments</span>
+                        {/* P1-only attach button */}
+                        {isP1 && (
+                          <input
+                            type="file"
+                            multiple
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+                            id={`attach-${selection.id}`}
+                            className="hidden"
+                            onChange={e => {
+                              if (e.target.files && e.target.files.length > 0)
+                                handleUpload(selection.id, null, e.target.files)
+                              e.target.value = ''
+                            }}
+                          />
+                        )}
+                        {isP1 && (
+                          <Button variant="primary" size="sm" disabled={!!uploadingId}
+                            onClick={() => document.getElementById(`attach-${selection.id}`)?.click()}>
+                            + Attach file
+                          </Button>
+                        )}
+                      </div>
+
+                      {currentAttachments.filter(a => !a.archived).length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-10 text-center">
+                          <FileText size={28} className="text-slate-300 mb-2" />
+                          <p className="text-sm font-semibold text-slate-500">No attachments yet</p>
+                          {isP1 && <p className="text-xs text-slate-400 mt-1">Click + Attach file to upload supporting documents.</p>}
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-50">
+                          {currentAttachments.filter(a => !a.archived).map(att => {
+                            const fi = fileInfo(att.file_name)
+                            return (
+                              <div key={att.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 group transition">
+                                <span className="text-base flex-shrink-0">{fi.icon}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-slate-800 truncate">{att.file_name}</p>
+                                  <p className="text-[11px] text-slate-400">{att.file_size} · {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                                </div>
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button onClick={() => setViewerFile({ url: att.file_url, name: att.file_name })}
+                                    className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
+                                    👁
+                                  </button>
+                                  <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
+                                    <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">⬇</button>
+                                  </a>
+                                  {/* Archive — P1 only */}
+                                  {isP1 && (
+                                    <button onClick={() => archiveAttDisc.open(att)}
+                                      className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition">
+                                      🗄️
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Blurred attachments for restricted users */
+                    <div className="relative rounded-xl overflow-hidden">
+                      <div className="bg-white border border-slate-200 rounded-xl p-6" style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none' }}>
+                        <div className="space-y-3">
+                          {[1, 2, 3].map(i => (
+                            <div key={i} className="flex items-center gap-3 h-12 bg-slate-50 rounded-lg px-4">
+                              <div className="w-8 h-8 bg-slate-200 rounded" />
+                              <div className="flex-1 space-y-1.5">
+                                <div className="h-3 bg-slate-200 rounded w-3/4" />
+                                <div className="h-2 bg-slate-100 rounded w-1/2" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="flex flex-col items-center gap-2 bg-white/95 px-5 py-4 rounded-2xl border border-slate-200 shadow-lg text-center">
+                          <Lock size={20} className="text-slate-500" />
+                          <p className="text-[13px] font-extrabold text-slate-700">Restricted Document</p>
+                          <p className="text-[11px] text-slate-500 max-w-[180px]">You do not have permission to view this file.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1103,9 +835,9 @@ export default function MasterPage() {
       </div>
 
       {/* Modals */}
-      <AddDocumentModal open={uploadModal.isOpen}  onClose={uploadModal.close}  onAdd={handleAdd} />
-      <ForwardModal     doc={activeDocForModals}    open={forwardModal.isOpen}   onClose={forwardModal.close} />
-      <EditModal        doc={activeDocForModals}    open={editModal.isOpen}      onClose={editModal.close} onSave={handleSave} />
+      <AddDocumentModal open={uploadModal.isOpen} onClose={uploadModal.close} onAdd={handleAdd} />
+      <ForwardModal doc={selection} open={forwardModal.isOpen} onClose={forwardModal.close} />
+      <EditModal doc={selection} open={editModal.isOpen} onClose={editModal.close} onSave={handleSave} />
 
       {viewerFile && (
         <InlineFileViewerModal
@@ -1116,12 +848,25 @@ export default function MasterPage() {
         />
       )}
 
+      {selection && (
+        <ApprovalWorkflowModal
+          open={approvalModal.isOpen}
+          onClose={approvalModal.close}
+          documentId={selection.id}
+          documentType="master"
+          documentTitle={selection.title}
+          approval={activeApproval}
+          onDone={() => {
+            setDocuments(prev => prev.map(d => d.id === selection.id ? { ...d, approval: { ...d.approval!, status: 'approved' } as DocumentApproval } : d))
+          }}
+        />
+      )}
+
       <ConfirmDialog
         open={archiveDisc.isOpen}
         title="Archive Document"
-        message={`Archive "${archiveDisc.payload}"? It will be moved to the Archive page and can be restored from there.`}
-        confirmLabel="Archive"
-        variant="danger"
+        message={`Archive "${archiveDisc.payload}"?`}
+        confirmLabel="Archive" variant="danger"
         onConfirm={handleArchiveDoc}
         onCancel={archiveDisc.close}
       />
@@ -1129,9 +874,8 @@ export default function MasterPage() {
       <ConfirmDialog
         open={archiveAttDisc.isOpen}
         title="Archive Attachment"
-        message={`Archive "${archiveAttDisc.payload?.file_name}"? It will be hidden from active view but can be restored at any time.`}
-        confirmLabel={archivingAtt ? 'Archiving…' : 'Archive'}
-        variant="primary"
+        message={`Archive "${archiveAttDisc.payload?.file_name}"?`}
+        confirmLabel="Archive" variant="primary"
         onConfirm={handleArchiveAttachment}
         onCancel={archiveAttDisc.close}
       />

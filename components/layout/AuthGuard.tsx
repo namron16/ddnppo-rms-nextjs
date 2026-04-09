@@ -29,21 +29,13 @@ export function AuthGuard({ requiredRole = 'any', children }: AuthGuardProps) {
       return
     }
 
-    if (requiredRole === 'admin' && user.role !== 'admin') {
-      router.replace('/dashboard')
-      return
-    }
-
-    if (requiredRole === 'officer' && user.role !== 'officer') {
+    // This app is admin-only; keep unsupported role requests on admin home.
+    if (requiredRole === 'officer') {
       router.replace('/admin/master')
     }
   }, [user, isLoading, requiredRole, router])
 
   if (isLoading || !user) {
-    return <LoadingSpinner fullPage />
-  }
-
-  if (requiredRole === 'admin' && user.role !== 'admin') {
     return <LoadingSpinner fullPage />
   }
 

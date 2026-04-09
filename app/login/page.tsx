@@ -1,102 +1,46 @@
 'use client'
-// app/login/page.tsx
+// app/login/page.tsx — Admin-Only Login (No public registration)
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { useAuth } from '@/lib/auth'
-import { LoginSchema, zodErrors } from '@/lib/validations'
-import { supabase } from '@/lib/supabase'
+import { useAuth, ADMIN_ACCOUNTS } from '@/lib/auth'
 
-interface LiveRequestTicker {
-  id: string
-  fullName: string
-  email: string
-  submittedAt: string
-}
+const ROLE_OPTIONS = ADMIN_ACCOUNTS.map(a => ({
+  id: a.id,
+  label: `${a.id} — ${a.title}`,
+}))
 
 export default function LoginPage() {
   const { login } = useAuth()
   const router    = useRouter()
 
-  const [email, setEmail]       = useState('rdelacruz@ddnppo.gov.ph')
-  const [password, setPassword] = useState('password')
-  const [errors, setErrors]     = useState<Record<string, string>>({})
-  const [authError, setAuthError] = useState('')
-
-  const [newRequestTicker, setNewRequestTicker] = useState<LiveRequestTicker | null>(null)
-  const [tickerVisible, setTickerVisible]       = useState(false)
-  const [realtimeConnected, setRealtimeConnected] = useState(false)
-
-  const channelRef    = useRef<ReturnType<typeof supabase.channel> | null>(null)
-  const tickerTimeout = useRef<ReturnType<typeof setTimeout>>()
-
-  const showTicker = useCallback((req: LiveRequestTicker) => {
-    setNewRequestTicker(req)
-    setTickerVisible(true)
-    clearTimeout(tickerTimeout.current)
-    tickerTimeout.current = setTimeout(() => setTickerVisible(false), 6000)
-  }, [])
-
-  // Realtime — new access requests ticker (admin-facing only)
-  useEffect(() => {
-    const channel = supabase
-      .channel('login_page_access_requests')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'access_requests' },
-        (payload) => {
-          const newReq = payload.new as {
-            id: string
-            full_name: string
-            email: string
-            submitted_at: string
-          }
-          showTicker({
-            id:          newReq.id,
-            fullName:    newReq.full_name,
-            email:       newReq.email,
-            submittedAt: newReq.submitted_at,
-          })
-        }
-      )
-      .subscribe((status) => {
-        setRealtimeConnected(status === 'SUBSCRIBED')
-      })
-
-    channelRef.current = channel
-    return () => {
-      supabase.removeChannel(channel)
-      clearTimeout(tickerTimeout.current)
-    }
-  }, [showTicker])
+  const [roleId, setRoleId]     = useState('')
+  const [password, setPassword] = useState('')
+  const [showPw, setShowPw]     = useState(false)
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setAuthError('')
+    setError('')
+    if (!roleId) { setError('Please select your role.'); return }
+    if (!password) { setError('Please enter your password.'); return }
 
-    const result = LoginSchema.safeParse({ email, password })
-    if (!result.success) {
-      setErrors(zodErrors(result.error))
-      return
-    }
-    setErrors({})
+    setLoading(true)
+    const success = login(roleId, password)
+    setLoading(false)
 
-    const success = login(result.data.email, result.data.password)
     if (!success) {
-      setAuthError('Invalid credentials. Use the demo credentials below.')
+      setError('Invalid credentials. Please check your role and password.')
       return
     }
-    const isAdmin = result.data.email === 'rdelacruz@ddnppo.gov.ph'
-    router.push(isAdmin ? '/admin/master' : '/dashboard')
+
+    router.push('/admin/master')
   }
 
-  const inputCls = (field: string) =>
-    `w-full px-4 py-3 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:bg-white transition ${
-      errors[field]
-        ? 'border-red-400 focus:border-red-400'
-        : 'border-slate-200 focus:border-blue-500'
-    }`
+  const cls = `w-full px-4 py-3 border-[1.5px] rounded-xl text-sm bg-slate-50 focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-100 transition ${
+    error ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-blue-500'
+  }`
 
   return (
     <div className="min-h-screen flex">
@@ -107,125 +51,127 @@ export default function LoginPage() {
         <div className="relative z-10 flex-1 flex flex-col justify-center">
           <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 mb-9 self-start">
             <div className="w-2 h-2 bg-yellow-400 rounded-full" />
-            <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II - Davao Norte Police Provincial Office</span>
+            <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II — Davao Norte PPO</span>
           </div>
           <h1 className="font-display text-5xl text-white leading-tight mb-4">
             Records Management<br />System
           </h1>
           <p className="text-white/60 text-[15px] leading-relaxed mb-12 max-w-sm">
-            Secure, centralized document management for Davao Norte Provincial Police Office.
+            Secure, centralized document management for DDNPPO authorized administrators only.
           </p>
-          <ul className="space-y-3.5">
+
+          {/* Role hierarchy display */}
+          <div className="space-y-2 max-w-xs">
+            <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-3">Admin Roles</p>
             {[
-              'Hierarchical document repository',
-              'Confidential document access control',
-              'Complete activity audit log',
-              'SMS-authenticated personnel access',
-            ].map(f => (
-              <li key={f} className="flex items-center gap-3 text-white/80 text-sm">
-                <div className="w-2 h-2 bg-yellow-400 rounded-full flex-shrink-0" />
-                {f}
-              </li>
+              { role: 'PD', desc: 'Provincial Director — Final Approver', color: '#dc2626' },
+              { role: 'DPDA/DPDO', desc: 'Deputy Directors — Reviewers', color: '#d97706' },
+              { role: 'P1', desc: 'Records Officer — Uploader', color: '#7c3aed' },
+              { role: 'P2–P10', desc: 'Admin Officers — Viewers', color: '#0891b2' },
+            ].map(r => (
+              <div key={r.role} className="flex items-center gap-2.5">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: r.color }} />
+                <span className="text-white/50 text-xs">
+                  <span className="text-white/80 font-semibold">{r.role}</span> — {r.desc}
+                </span>
+              </div>
             ))}
-          </ul>
-        </div>
-
-        {/* Realtime connection indicator */}
-        <div className={`flex items-center gap-2 self-start mt-8 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
-          realtimeConnected
-            ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
-            : 'bg-white/5 border-white/10 text-white/30'
-        }`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${realtimeConnected ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`} />
-          {realtimeConnected ? 'Live updates active' : 'Connecting…'}
-        </div>
-
-        {/* New request ticker (admin-visible) */}
-        <div className={`absolute bottom-6 left-6 right-6 transition-all duration-500 ${
-          tickerVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
-        }`}>
-          <div className="bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl px-4 py-3 flex items-start gap-3">
-            <span className="text-amber-300 text-lg flex-shrink-0 mt-0.5">🔔</span>
-            <div className="min-w-0">
-              <p className="text-white text-xs font-bold leading-snug">New access request</p>
-              <p className="text-white/70 text-xs truncate">
-                {newRequestTicker?.fullName} — {newRequestTicker?.email}
-              </p>
-              <p className="text-white/40 text-[10px] mt-0.5">Just now</p>
-            </div>
-            <button
-              onClick={() => setTickerVisible(false)}
-              className="text-white/40 hover:text-white/80 ml-auto flex-shrink-0 text-base"
-            >×</button>
           </div>
+        </div>
+
+        {/* Shield icon bottom */}
+        <div className="flex items-center gap-2 mt-8 self-start">
+          <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center">🛡️</div>
+          <span className="text-white/40 text-xs">Authorized Personnel Only</span>
         </div>
       </div>
 
-      {/* ── Right: Form ── */}
+      {/* ── Right: Login Form ── */}
       <div className="w-[460px] bg-white px-14 flex flex-col justify-center">
-        <h2 className="font-display text-3xl text-slate-800 mb-2">Sign In</h2>
-        <p className="text-slate-500 text-sm mb-9">
-          Access restricted to authorized DNPPO personnel.
-        </p>
+        <div className="mb-8">
+          <h2 className="font-display text-3xl text-slate-800 mb-1">Admin Sign In</h2>
+          <p className="text-slate-500 text-sm">Access restricted to authorized DDNPPO administrators.</p>
+        </div>
 
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
+
+          {/* Role selector */}
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">
-              Email Address
+              Your Role <span className="text-red-500">*</span>
             </label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => { setEmail(e.target.value); setErrors(p => ({ ...p, email: '' })) }}
-              placeholder="yourname@ddnppo.gov.ph"
-              className={inputCls('email')}
-            />
-            {errors.email && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.email}</p>}
+            <select
+              value={roleId}
+              onChange={e => { setRoleId(e.target.value); setError('') }}
+              className={cls}
+              disabled={loading}
+            >
+              <option value="">Select your admin role…</option>
+              {ROLE_OPTIONS.map(r => (
+                <option key={r.id} value={r.id}>{r.label}</option>
+              ))}
+            </select>
           </div>
 
+          {/* Password */}
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">
-              Password
+              Password <span className="text-red-500">*</span>
             </label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => { setPassword(e.target.value); setErrors(p => ({ ...p, password: '' })) }}
-              placeholder="Enter password"
-              className={inputCls('password')}
-            />
-            {errors.password && <p className="text-xs text-red-500 mt-1.5 font-medium">⚠ {errors.password}</p>}
+            <div className="relative">
+              <input
+                type={showPw ? 'text' : 'password'}
+                value={password}
+                onChange={e => { setPassword(e.target.value); setError('') }}
+                placeholder="Enter your password"
+                className={`${cls} pr-10`}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+              >
+                {showPw ? '🙈' : '👁'}
+              </button>
+            </div>
           </div>
 
-          {authError && (
-            <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-              {authError}
-            </p>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
+              {error}
+            </div>
           )}
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition text-[15px]"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition text-[15px] disabled:opacity-60 flex items-center justify-center gap-2"
           >
-            Sign In
+            {loading ? (
+              <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Signing in…</>
+            ) : '🔐 Sign In'}
           </button>
         </form>
 
-        <p className="text-center mt-4 text-sm text-slate-500">
-          No account?{' '}
-          <Link href="/register" className="text-blue-600 font-medium hover:underline">
-            Request access
-          </Link>
+        <p className="text-center mt-6 text-xs text-slate-400 leading-relaxed">
+          Access credentials are issued by your system administrator.<br />
+          No public registration available.
         </p>
 
-        <div className="mt-7 p-4 bg-blue-50 border border-blue-200 rounded-lg text-[12.5px] text-slate-600 leading-relaxed">
-          <span className="block text-[11px] font-bold uppercase text-blue-600 tracking-wide mb-1">
-            Demo Credentials
-          </span>
-          Admin: rdelacruz@ddnppo.gov.ph<br />
-          User: asantos@ddnppo.gov.ph<br />
-          Password: password
-        </div>
+        {/* Dev helper — remove in production */}
+        <details className="mt-6">
+          <summary className="text-[11px] text-slate-300 cursor-pointer hover:text-slate-400">
+            Dev credentials (remove in production)
+          </summary>
+          <div className="mt-2 p-3 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 space-y-1">
+            <p><strong>PD</strong>: pd@ddnppo2024</p>
+            <p><strong>DPDA</strong>: dpda@ddnppo2024</p>
+            <p><strong>DPDO</strong>: dpdo@ddnppo2024</p>
+            <p><strong>P1</strong>: p1@ddnppo2024</p>
+            <p><strong>P2–P10</strong>: p2@ddnppo2024 … p10@ddnppo2024</p>
+          </div>
+        </details>
       </div>
     </div>
   )

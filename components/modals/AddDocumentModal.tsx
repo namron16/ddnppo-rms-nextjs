@@ -1,13 +1,23 @@
 'use client'
-// components/modals/AddDocumentModal.tsx
+// components/modals/AddDocumentModal.tsx  (v2)
+// P1-only upload modal with integrated VisibilityTagSelector
+// Backend guard: assertCanUpload() throws if not P1
 
 import { useState, useRef } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase'
+import { VisibilityTagSelector } from '@/components/ui/VisibilityTagSelector'
 import { AddDocumentSchema, zodErrors } from '@/lib/validations'
+import {
+  setDocumentVisibility,
+  createApproval,
+  assertCanUpload,
+} from '@/lib/rbac'
+import { useAuth } from '@/lib/auth'
 import type { MasterDocument } from '@/types'
+import type { AdminRole } from '@/lib/auth'
 
 type DocWithUrl = MasterDocument & { fileUrl?: string }
 
@@ -18,7 +28,8 @@ interface AddDocumentModalProps {
 }
 
 export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps) {
-  const { toast }    = useToast()
+  const { toast }  = useToast()
+  const { user }   = useAuth()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const today = new Date().toISOString().split('T')[0]
 
@@ -26,6 +37,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   const [dragging, setDragging]   = useState(false)
   const [uploading, setUploading] = useState(false)
   const [errors, setErrors]       = useState<Record<string, string>>({})
+  const [taggedRoles, setTaggedRoles] = useState<AdminRole[]>([])
 
   const [form, setForm] = useState({
     title: '', level: 'REGIONAL', type: 'PDF', date: today, tag: 'COMPLIANCE',
@@ -39,12 +51,11 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   function handleFileChange(incoming: File | null) {
     if (!incoming) return
     setFile(incoming)
-    setForm(prev => (prev.date ? prev : { ...prev, date: today }))
     const ext = incoming.name.split('.').pop()?.toUpperCase() ?? ''
-    if (['PDF', 'DOCX', 'DOC', 'XLSX', 'XLS'].includes(ext)) {
+    if (['PDF','DOCX','DOC','XLSX','XLS'].includes(ext)) {
       const mapped = ext.startsWith('DOC') ? 'DOCX' : ext.startsWith('XLS') ? 'XLSX' : ext
       setForm(prev => ({ ...prev, type: mapped }))
-    } else if (['JPG', 'JPEG', 'PNG', 'WEBP'].includes(ext)) {
+    } else if (['JPG','JPEG','PNG','WEBP'].includes(ext)) {
       setForm(prev => ({ ...prev, type: 'Image' }))
     }
   }
@@ -53,18 +64,23 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     setForm({ title: '', level: 'REGIONAL', type: 'PDF', date: today, tag: 'COMPLIANCE' })
     setErrors({})
     setFile(null)
+    setTaggedRoles([])
     if (fileInputRef.current) fileInputRef.current.value = ''
-    setDragging(false)
     onClose()
   }
 
   async function handleSubmit() {
-    // ── Zod validation ──────────────────────────────
-    const result = AddDocumentSchema.safeParse(form)
-    if (!result.success) {
-      setErrors(zodErrors(result.error))
+    // ── BACKEND GUARD: only P1 may upload ──
+    if (!user) { toast.error('Not authenticated.'); return }
+    try {
+      assertCanUpload(user.role)
+    } catch (err: any) {
+      toast.error(err.message ?? 'Upload denied.')
       return
     }
+
+    const result = AddDocumentSchema.safeParse(form)
+    if (!result.success) { setErrors(zodErrors(result.error)); return }
     setErrors({})
     setUploading(true)
 
@@ -78,19 +94,15 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           .from('documents')
           .upload(fileName, file, { cacheControl: '3600', upsert: false })
 
-        if (storageError) {
-          toast.error('File upload failed. Please try again.')
-          setUploading(false)
-          return
-        }
-
+        if (storageError) { toast.error('File upload failed. Please try again.'); setUploading(false); return }
         const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
         fileUrl  = urlData.publicUrl
         fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB'
       }
 
+      const newDocId = `md-${Date.now()}`
       const newDoc: DocWithUrl = {
-        id:      `md-${Date.now()}`,
+        id:      newDocId,
         title:   result.data.title,
         level:   result.data.level as MasterDocument['level'],
         type:    result.data.type,
@@ -101,7 +113,21 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
       }
 
       if (onAdd) await onAdd(newDoc)
-      toast.success(`"${result.data.title}" uploaded successfully.`)
+
+      // 1. Set visibility (tag-based) — P1 is the tagger
+      const visOk = await setDocumentVisibility(
+        newDocId, 'master', taggedRoles, result.data.title, 'P1'
+      )
+      if (!visOk) toast.warning('Document saved but visibility assignment had an issue.')
+
+      // 2. Create approval workflow record
+      await createApproval(newDocId, 'master', result.data.title)
+
+      const tagSummary = taggedRoles.length === 0
+        ? 'No P2–P10 tagged — all viewers restricted.'
+        : `Tagged: ${taggedRoles.join(', ')}`
+
+      toast.success(`"${result.data.title}" uploaded. ${tagSummary} DPDA & DPDO notified.`)
       resetAndClose()
     } catch (err) {
       console.error(err)
@@ -117,9 +143,9 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     }`
 
   const fileIcon =
-    file?.name.endsWith('.pdf')              ? '📕'
-    : file?.name.match(/\.docx?$/i)         ? '📘'
-    : file?.name.match(/\.xlsx?$/i)         ? '📗'
+    file?.name.endsWith('.pdf')       ? '📕'
+    : file?.name.match(/\.docx?$/i)  ? '📘'
+    : file?.name.match(/\.xlsx?$/i)  ? '📗'
     : file?.name.match(/\.(jpg|jpeg|png|webp)$/i) ? '🖼️'
     : '📄'
 
@@ -127,6 +153,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
     <Modal open={open} onClose={uploading ? () => {} : resetAndClose} title="Upload Master Document" width="max-w-lg">
       <div className="p-6 space-y-4">
 
+        {/* Title */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
             Document Title <span className="text-red-500">*</span>
@@ -138,11 +165,11 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           {errors.title && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.title}</p>}
         </div>
 
+        {/* Level + Tag */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Level</label>
-            <select className={cls('level')} value={form.level}
-              onChange={e => handleChange('level', e.target.value)} disabled={uploading}>
+            <select className={cls('level')} value={form.level} onChange={e => handleChange('level', e.target.value)} disabled={uploading}>
               <option value="REGIONAL">Regional</option>
               <option value="PROVINCIAL">Provincial</option>
               <option value="STATION">Station</option>
@@ -150,8 +177,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Tag</label>
-            <select className={cls('tag')} value={form.tag}
-              onChange={e => handleChange('tag', e.target.value)} disabled={uploading}>
+            <select className={cls('tag')} value={form.tag} onChange={e => handleChange('tag', e.target.value)} disabled={uploading}>
               <option value="COMPLIANCE">Compliance</option>
               <option value="DIRECTIVE">Directive</option>
               <option value="CIRCULAR">Circular</option>
@@ -160,19 +186,18 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
         </div>
 
+        {/* Date + Type */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+            <label className="block text-[11px] font-semibold uppercase tracking-widests text-slate-500 mb-1.5">
               Document Date <span className="text-red-500">*</span>
             </label>
-            <input type="date" className={cls('date')} value={form.date}
-              onChange={e => handleChange('date', e.target.value)} disabled={uploading} />
+            <input type="date" className={cls('date')} value={form.date} onChange={e => handleChange('date', e.target.value)} disabled={uploading} />
             {errors.date && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.date}</p>}
           </div>
           <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">File Type</label>
-            <select className={cls('type')} value={form.type}
-              onChange={e => handleChange('type', e.target.value)} disabled={uploading}>
+            <label className="block text-[11px] font-semibold uppercase tracking-widests text-slate-500 mb-1.5">File Type</label>
+            <select className={cls('type')} value={form.type} onChange={e => handleChange('type', e.target.value)} disabled={uploading}>
               <option value="PDF">PDF</option>
               <option value="DOCX">DOCX</option>
               <option value="XLSX">XLSX</option>
@@ -181,6 +206,14 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
         </div>
 
+        {/* ── Visibility Tag Selector (P1 only) ── */}
+        <VisibilityTagSelector
+          selected={taggedRoles}
+          onChange={setTaggedRoles}
+          disabled={uploading}
+        />
+
+        {/* File upload */}
         <input ref={fileInputRef} type="file"
           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
           className="hidden"
@@ -214,19 +247,26 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
           </div>
         )}
 
+        {/* Upload notice */}
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-800">
+          <span className="flex-shrink-0 mt-0.5">📋</span>
+          <span>
+            Document will be submitted to DPDA/DPDO for review, then PD for final approval.
+            Only tagged P2–P10 admins will see it once approved.
+          </span>
+        </div>
+
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            <p className="text-sm text-blue-700 font-medium">
-              {file ? 'Uploading to cloud storage…' : 'Saving document…'}
-            </p>
+            <p className="text-sm text-blue-700 font-medium">Uploading &amp; setting visibility…</p>
           </div>
         )}
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
           <Button variant="primary" onClick={handleSubmit} disabled={uploading}>
-            {uploading ? 'Uploading…' : '📤 Upload'}
+            {uploading ? 'Uploading…' : '📤 Upload & Set Visibility'}
           </Button>
         </div>
       </div>
