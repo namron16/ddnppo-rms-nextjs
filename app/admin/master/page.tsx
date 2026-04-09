@@ -13,7 +13,8 @@ import { ToolbarSelect }    from '@/components/ui/Toolbar'
 import { Modal }            from '@/components/ui/Modal'
 import { AddDocumentModal } from '@/components/modals/AddDocumentModal'
 import { ApprovalWorkflowModal }  from '@/components/modals/ApprovalWorkflowModal'
-import { BlurredDocumentGuard, ApprovalStatusBadge } from '@/components/ui/BlurredDocumentGuard'
+import { ApprovalStatusBadge } from '@/components/ui/BlurredDocumentGuard'
+import { EnhancedDocumentGuard } from '@/components/ui/EnhancedDocumentGuard'
 import { UploadGuard }      from '@/components/ui/UploadGuard'
 import { useModal, useDisclosure } from '@/hooks'
 import { useToast }         from '@/components/ui/Toast'
@@ -612,15 +613,14 @@ export default function MasterPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        {/* Visibility check for non-privileged users */}
-                        {!isPrivileged && !selection.canView ? (
-                          <h2 className="text-lg font-extrabold text-slate-400 flex items-center gap-2">
-                            <Lock size={18} className="text-slate-400" />
-                            <span style={{ filter: 'blur(5px)', userSelect: 'none' }}>Restricted Document</span>
-                          </h2>
-                        ) : (
+                        <EnhancedDocumentGuard
+                          documentId={selection.id}
+                          documentType="master"
+                          documentTitle={selection.title}
+                          canView={selection.canView ?? isPrivileged}
+                        >
                           <h2 className="text-lg font-extrabold text-slate-800">{selection.title}</h2>
-                        )}
+                        </EnhancedDocumentGuard>
                         <Badge className={levelBadgeClass(selection.level)}>{selection.level}</Badge>
                         <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{selection.tag}</Badge>
                         {selection.approval && (
@@ -662,46 +662,36 @@ export default function MasterPage() {
                     </div>
                   </div>
 
-                  {/* Primary file — only visible to authorized users */}
-                  {selection.fileUrl && (isPrivileged || selection.canView) ? (
-                    <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
-                      <span className="text-lg flex-shrink-0">
-                        {selection.type === 'PDF' ? '📕' : selection.type === 'DOCX' ? '📘' : selection.type === 'XLSX' ? '📗' : '🖼️'}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
-                        <p className="text-xs text-blue-600 truncate">{selection.title}.{selection.type.toLowerCase()}</p>
-                      </div>
-                      <div className="flex gap-1.5 flex-shrink-0">
-                        <a href={selection.fileUrl} download target="_blank" rel="noopener noreferrer"
-                          className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
-                          ⬇ Download
-                        </a>
-                        <button
-                          onClick={() => setViewerFile({ url: selection.fileUrl!, name: selection.title })}
-                          className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
-                        >
-                          👁 View
-                        </button>
-                      </div>
-                    </div>
-                  ) : selection.fileUrl && !selection.canView && !isPrivileged ? (
-                    /* Blurred file strip for restricted users */
-                    <div className="relative overflow-hidden rounded-xl">
-                      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl"
-                        style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none' }}>
-                        <span className="text-lg">📕</span>
-                        <div>
-                          <p className="text-xs font-semibold">Restricted file</p>
-                          <p className="text-xs text-slate-500">••••••••••••.pdf</p>
+                  {/* Primary file — viewers can request unblur access, P1 can approve */}
+                  {selection.fileUrl ? (
+                    <EnhancedDocumentGuard
+                      documentId={selection.id}
+                      documentType="master"
+                      documentTitle={selection.title}
+                      canView={selection.canView ?? isPrivileged}
+                    >
+                      <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+                        <span className="text-lg flex-shrink-0">
+                          {selection.type === 'PDF' ? '📕' : selection.type === 'DOCX' ? '📘' : selection.type === 'XLSX' ? '📗' : '🖼️'}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
+                          <p className="text-xs text-blue-600 truncate">{selection.title}.{selection.type.toLowerCase()}</p>
+                        </div>
+                        <div className="flex gap-1.5 flex-shrink-0">
+                          <a href={selection.fileUrl} download target="_blank" rel="noopener noreferrer"
+                            className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
+                            ⬇ Download
+                          </a>
+                          <button
+                            onClick={() => setViewerFile({ url: selection.fileUrl!, name: selection.title })}
+                            className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
+                          >
+                            👁 View
+                          </button>
                         </div>
                       </div>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-white/90 px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
-                          <Lock size={12} /> Restricted Access
-                        </span>
-                      </div>
-                    </div>
+                    </EnhancedDocumentGuard>
                   ) : null}
 
                   {/* Visibility tagging info for P1 */}

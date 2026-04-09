@@ -14,7 +14,8 @@ import { SearchInput }             from '@/components/ui/SearchInput'
 import { Modal }                   from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { ApprovalWorkflowModal }   from '../../../components/modals/ApprovalWorkflowModal'
-import { BlurredDocumentGuard, ApprovalStatusBadge } from '../../../components/ui/BlurredDocumentGuard'
+import { ApprovalStatusBadge } from '../../../components/ui/BlurredDocumentGuard'
+import { EnhancedDocumentGuard }   from '@/components/ui/EnhancedDocumentGuard'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }                from '@/components/ui/Toast'
 import { useAuth }                 from '@/lib/auth'
@@ -280,14 +281,15 @@ export default function ClassifiedDocumentsPage() {
                   {filtered.map(doc => (
                     <tr key={doc.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-4 py-3.5">
-                        <BlurredDocumentGuard
+                        <EnhancedDocumentGuard
                           documentId={doc.id}
-                          documentType="classified_document"
+                          documentType="daily_journal"
+                          documentTitle={doc.title}
                           canView={doc.canView ?? isPrivileged}
                         >
                           <span className="mr-2">📒</span>
                           <span className="font-semibold text-sm text-slate-800">{doc.title}</span>
-                        </BlurredDocumentGuard>
+                        </EnhancedDocumentGuard>
                       </td>
                       <td className="px-4 py-3.5">
                         <Badge className={classificationBadgeClass(doc.classification)}>{doc.classification}</Badge>
