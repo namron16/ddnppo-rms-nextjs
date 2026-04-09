@@ -617,7 +617,7 @@ export default function MasterPage() {
                           documentId={selection.id}
                           documentType="master"
                           documentTitle={selection.title}
-                          canView={selection.canView ?? isPrivileged}
+                          canView={isPrivileged ? true : undefined}
                         >
                           <h2 className="text-lg font-extrabold text-slate-800">{selection.title}</h2>
                         </EnhancedDocumentGuard>
@@ -668,7 +668,7 @@ export default function MasterPage() {
                       documentId={selection.id}
                       documentType="master"
                       documentTitle={selection.title}
-                      canView={selection.canView ?? isPrivileged}
+                      canView={isPrivileged ? true : undefined}
                     >
                       <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
                         <span className="text-lg flex-shrink-0">
@@ -726,7 +726,12 @@ export default function MasterPage() {
                   )}
 
                   {/* Attachments — only shown to authorized users */}
-                  {(isPrivileged || selection.canView) ? (
+                  <EnhancedDocumentGuard
+                    documentId={selection.id}
+                    documentType="master"
+                    documentTitle={selection.title}
+                    canView={isPrivileged ? true : undefined}
+                  >
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
                         <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Attachments</span>
@@ -792,29 +797,7 @@ export default function MasterPage() {
                         </div>
                       )}
                     </div>
-                  ) : (
-                    /* Blurred attachments for restricted users with request-to-P1 action */
-                    <EnhancedDocumentGuard
-                      documentId={selection.id}
-                      documentType="master"
-                      documentTitle={selection.title}
-                      canView={selection.canView ?? isPrivileged}
-                    >
-                      <div className="bg-white border border-slate-200 rounded-xl p-6">
-                        <div className="space-y-3">
-                          {[1, 2, 3].map(i => (
-                            <div key={i} className="flex items-center gap-3 h-12 bg-slate-50 rounded-lg px-4">
-                              <div className="w-8 h-8 bg-slate-200 rounded" />
-                              <div className="flex-1 space-y-1.5">
-                                <div className="h-3 bg-slate-200 rounded w-3/4" />
-                                <div className="h-2 bg-slate-100 rounded w-1/2" />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </EnhancedDocumentGuard>
-                  )}
+                  </EnhancedDocumentGuard>
                 </div>
               )}
             </div>

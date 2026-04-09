@@ -285,7 +285,7 @@ export default function ClassifiedDocumentsPage() {
                           documentId={doc.id}
                           documentType="daily_journal"
                           documentTitle={doc.title}
-                          canView={doc.canView ?? isPrivileged}
+                          canView={isPrivileged ? true : undefined}
                           compact
                         >
                           <span className="mr-2">📒</span>

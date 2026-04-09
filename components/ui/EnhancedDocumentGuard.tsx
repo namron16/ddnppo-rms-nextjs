@@ -76,8 +76,11 @@ export function EnhancedDocumentGuard({
   }, [user, documentId])
 
   useEffect(() => {
-    if (preloadedCanView !== undefined) {
-      setCanView(preloadedCanView)
+    // Only trust preloaded TRUE as final. Preloaded FALSE can be stale,
+    // so still perform a live access check.
+    if (preloadedCanView === true) {
+      setCanView(true)
+      setCheckingAccess(false)
       return
     }
     checkAccess()
