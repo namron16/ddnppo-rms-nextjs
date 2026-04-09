@@ -48,6 +48,15 @@ export interface AdminNotification {
   created_at: string
 }
 
+const TEMP_VIEW_ACCESS_MS = 24 * 60 * 60 * 1000
+
+function isWithin24Hours(isoDate?: string | null): boolean {
+  if (!isoDate) return true
+  const ts = new Date(isoDate).getTime()
+  if (Number.isNaN(ts)) return false
+  return Date.now() - ts <= TEMP_VIEW_ACCESS_MS
+}
+
 // ══════════════════════════════════════════════
 // UPLOAD AUTHORIZATION GUARD
 // ══════════════════════════════════════════════
@@ -157,14 +166,30 @@ export async function canAdminViewDocument(
 
   const { data, error } = await supabase
     .from('document_visibility')
-    .select('can_view')
+    .select('can_view, granted_at, granted_by')
     .eq('document_id',   documentId)
     .eq('document_type', documentType)
     .eq('admin_id',      adminId)
     .maybeSingle()
 
   if (error || !data) return false
-  return data.can_view === true
+  if (data.can_view !== true) return false
+
+  // Temporary grants (from request approvals) expire after 24 hours.
+  const isTemporaryGrant = !!(data as any).granted_at && !!(data as any).granted_by
+  if (!isTemporaryGrant) return true
+
+  if (isWithin24Hours((data as any).granted_at)) return true
+
+  await supabase
+    .from('document_visibility')
+    .update({ can_view: false })
+    .eq('document_id', documentId)
+    .eq('document_type', documentType)
+    .eq('admin_id', adminId)
+    .eq('can_view', true)
+
+  return false
 }
 
 /**
@@ -185,14 +210,23 @@ export async function getBatchVisibility(
 
   const { data, error } = await supabase
     .from('document_visibility')
-    .select('document_id')
+    .select('document_id, granted_at, granted_by')
     .in('document_id',  documentIds)
     .eq('document_type', documentType)
     .eq('admin_id',      adminId)
     .eq('can_view',      true)
 
   if (error) return new Set()
-  return new Set((data ?? []).map((r: any) => r.document_id))
+
+  const allowed = new Set<string>()
+  for (const row of (data ?? []) as any[]) {
+    const isTemporaryGrant = !!row.granted_at && !!row.granted_by
+    if (!isTemporaryGrant || isWithin24Hours(row.granted_at)) {
+      allowed.add(row.document_id)
+    }
+  }
+
+  return allowed
 }
 
 /**

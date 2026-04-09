@@ -68,7 +68,8 @@ export function EnhancedDocumentGuard({
     // Load existing request for status display
     if (!hasAccess) {
       const req = await getViewRequestForDoc(documentId, user.role as AdminRole)
-      setExistingRequest(req)
+      // If access is no longer valid, treat prior approved requests as expired.
+      setExistingRequest(req?.status === 'approved' ? null : req)
     }
 
     setCheckingAccess(false)

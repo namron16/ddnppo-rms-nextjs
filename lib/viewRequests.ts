@@ -26,6 +26,15 @@ export interface DocumentViewRequest {
 
 export type ViewRequestStatus = DocumentViewRequest['status']
 
+const TEMP_VIEW_ACCESS_MS = 24 * 60 * 60 * 1000
+
+function isWithin24Hours(isoDate?: string | null): boolean {
+  if (!isoDate) return true
+  const ts = new Date(isoDate).getTime()
+  if (Number.isNaN(ts)) return false
+  return Date.now() - ts <= TEMP_VIEW_ACCESS_MS
+}
+
 // ── Viewer roles that must request access ────
 export const VIEWER_ROLES_NEEDING_REQUEST: AdminRole[] = [
   'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10',
@@ -293,24 +302,42 @@ export async function hasApprovedViewRequest(
   // Check document_visibility table first (most authoritative)
   const { data: visData } = await supabase
     .from('document_visibility')
-    .select('can_view')
+    .select('can_view, granted_at, granted_by')
     .eq('document_id', documentId)
     .eq('admin_id', requesterId)
     .eq('can_view', true)
     .maybeSingle()
 
-  if (visData?.can_view) return true
+  if (visData?.can_view) {
+    // Rows tagged by P1 for baseline visibility remain permanent (no grant metadata).
+    // Request-based grants include granted_at/granted_by and expire after 24 hours.
+    const isTemporaryGrant = !!(visData as any).granted_at && !!(visData as any).granted_by
+    if (!isTemporaryGrant) return true
+    if (isWithin24Hours((visData as any).granted_at)) return true
+
+    await supabase
+      .from('document_visibility')
+      .update({ can_view: false })
+      .eq('document_id', documentId)
+      .eq('admin_id', requesterId)
+      .eq('can_view', true)
+
+    return false
+  }
 
   // Fallback: check request status
   const { data } = await supabase
     .from('document_view_requests')
-    .select('status')
+    .select('status, reviewed_at')
     .eq('document_id', documentId)
     .eq('requester_id', requesterId)
     .eq('status', 'approved')
+    .order('reviewed_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
-  return !!data
+  if (!data) return false
+  return isWithin24Hours((data as any).reviewed_at)
 }
 
 /**
@@ -328,13 +355,22 @@ export async function batchCheckViewAccess(
 
   const { data, error } = await supabase
     .from('document_visibility')
-    .select('document_id')
+    .select('document_id, granted_at, granted_by')
     .in('document_id', documentIds)
     .eq('admin_id', requesterId)
     .eq('can_view', true)
 
   if (error) return new Set()
-  return new Set((data ?? []).map((r: any) => r.document_id as string))
+
+  const allowed = new Set<string>()
+  for (const row of (data ?? []) as any[]) {
+    const isTemporaryGrant = !!row.granted_at && !!row.granted_by
+    if (!isTemporaryGrant || isWithin24Hours(row.granted_at)) {
+      allowed.add(row.document_id as string)
+    }
+  }
+
+  return allowed
 }
 
 // ── Permission Helpers ────────────────────────

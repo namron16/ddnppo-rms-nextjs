@@ -3,6 +3,7 @@
 // Enhanced: hardcoded admin accounts + real-time presence + access request queue
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { PageHeader }    from '@/components/ui/PageHeader'
 import { Badge }         from '@/components/ui/Badge'
 import { Button }        from '@/components/ui/Button'
@@ -17,13 +18,14 @@ import { supabase }      from '@/lib/supabase'
 import { ADMIN_ACCOUNTS } from '@/lib/auth'
 import {
   getAllAdminPresence,
-  getPendingAccessRequests,
-  reviewAccessRequest,  
-  approveAccessRequest,
-  rejectAccessRequest,
   type AdminPresence,
-  type DocumentAccessRequest,
 } from '@/lib/accessRequests'
+import {
+  getAllViewRequests,
+  approveViewRequest,
+  rejectViewRequest,
+  type DocumentViewRequest,
+} from '@/lib/viewRequests'
 import type { AdminRole } from '@/lib/auth'
 import { useAuth } from '@/lib/auth'
 
@@ -99,7 +101,7 @@ function PresenceDot({ isActive }: { isActive: boolean }) {
 function RejectDocAccessModal({
   request, open, onClose, onReject,
 }: {
-  request: DocumentAccessRequest | null; open: boolean; onClose: () => void
+  request: DocumentViewRequest | null; open: boolean; onClose: () => void
   onReject: (id: string, reason: string) => Promise<void>
 }) {
   const [reason, setReason] = useState('')
@@ -141,6 +143,7 @@ function RejectDocAccessModal({
 export default function UserManagementPage() {
   const { toast } = useToast()
   const { user: currentUser } = useAuth()
+  const searchParams = useSearchParams()
   const [activeTab, setActiveTab] = useState<'accounts' | 'requests' | 'doc_access'>('accounts')
 
   // Admin accounts with presence
@@ -159,6 +162,7 @@ export default function UserManagementPage() {
 
   // Document access requests
   const [docAccessRequests, setDocAccessRequests] = useState<DocumentAccessRequest[]>([])
+  const [docAccessRequests, setDocAccessRequests] = useState<DocumentViewRequest[]>([])
   const [loadingDocAccess, setLoadingDocAccess] = useState(true)
   const [processingDocReq, setProcessingDocReq] = useState<string | null>(null)
 
@@ -203,7 +207,7 @@ export default function UserManagementPage() {
   // ── Load document access requests ─────────────
   const loadDocAccessRequests = useCallback(async () => {
     setLoadingDocAccess(true)
-    const data = await getPendingAccessRequests()
+    const data = await getAllViewRequests(300)
     setDocAccessRequests(data)
     setLoadingDocAccess(false)
   }, [])
@@ -252,14 +256,14 @@ export default function UserManagementPage() {
       })
       .subscribe()
 
-    // Realtime: document_access_requests
+    // Realtime: document_view_requests
     const docReqChannel = supabase
       .channel('doc_access_requests')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'document_access_requests' }, () => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'document_view_requests' }, () => {
         loadDocAccessRequests()
         toast.info('New document access request received.')
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'document_access_requests' }, () => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'document_view_requests' }, () => {
         loadDocAccessRequests()
       })
       .subscribe()
@@ -274,6 +278,13 @@ export default function UserManagementPage() {
   }, [loadPresence, loadRequests, loadDocAccessRequests]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (activeTab === 'requests') setUnreadCount(0) }, [activeTab])
+
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (tab === 'view_requests' || tab === 'doc_access') {
+      setActiveTab('doc_access')
+    }
+  }, [searchParams])
 
   // ── Handle approve/reject (system access requests) ──
   async function handleApprove() {
@@ -308,30 +319,14 @@ export default function UserManagementPage() {
   }
 
   // ── Handle document access requests ───────────
-  const canReviewDocAccess = currentUser && (
-    currentUser.role === 'DPDA' || currentUser.role === 'DPDO' || currentUser.role === 'PD'
-  )
-
-  async function handleDocAccessReview(requestId: string) {
-    if (!currentUser || !canReviewDocAccess) return
-    if (currentUser.role !== 'DPDA' && currentUser.role !== 'DPDO') return
-    setProcessingDocReq(requestId)
-    const ok = await reviewAccessRequest(requestId, currentUser.role as 'DPDA' | 'DPDO')
-    if (ok) {
-      toast.success('Request marked as reviewed. PD has been notified.')
-      loadDocAccessRequests()
-    } else {
-      toast.error('Failed to review request.')
-    }
-    setProcessingDocReq(null)
-  }
+  const canReviewDocAccess = currentUser?.role === 'P1'
 
   async function handleDocAccessApprove(requestId: string) {
-    if (!currentUser || currentUser.role !== 'PD') return
+    if (!currentUser || currentUser.role !== 'P1') return
     setProcessingDocReq(requestId)
-    const ok = await approveAccessRequest(requestId)
+    const ok = await approveViewRequest(requestId, 'P1')
     if (ok) {
-      toast.success('Document access granted successfully.')
+      toast.success('Document access granted for 24 hours.')
       loadDocAccessRequests()
     } else {
       toast.error('Failed to approve access.')
@@ -340,11 +335,12 @@ export default function UserManagementPage() {
   }
 
   async function handleDocAccessReject(requestId: string, reason: string) {
+    if (!currentUser || currentUser.role !== 'P1') return
     setProcessingDocReq(requestId)
-    const ok = await rejectAccessRequest(requestId, reason)
+    const ok = await rejectViewRequest(requestId, 'P1', reason)
     if (ok) {
       toast.success('Access request rejected.')
-      setDocAccessRequests(prev => prev.filter(r => r.id !== requestId))
+      loadDocAccessRequests()
     } else {
       toast.error('Failed to reject request.')
     }
@@ -540,6 +536,10 @@ export default function UserManagementPage() {
                 <button onClick={loadDocAccessRequests} className="text-xs text-slate-500 hover:text-slate-700 font-medium">🔄 Refresh</button>
               </div>
 
+              <div className="px-6 py-3 bg-blue-50 border-b border-blue-100">
+                <p className="text-xs text-blue-800 font-medium">Approved requests are valid for 24 hours only and grant view-only access.</p>
+              </div>
+
               {loadingDocAccess ? (
                 <div className="flex items-center justify-center py-16">
                   <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -551,7 +551,7 @@ export default function UserManagementPage() {
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200">
-                        {['Requester', 'Document Type', 'Status', 'Reviewed By', 'Submitted', 'Actions'].map(h => (
+                        {['Requester', 'Document', 'Document Type', 'Status', 'Reviewed By', 'Approved Until', 'Submitted', 'Actions'].map(h => (
                           <th key={h} className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widests text-slate-400">{h}</th>
                         ))}
                       </tr>
@@ -571,6 +571,10 @@ export default function UserManagementPage() {
                               </div>
                             </td>
                             <td className="px-4 py-3.5">
+                              <p className="text-sm font-semibold text-slate-800 truncate max-w-[280px]">{req.document_title ?? req.document_id}</p>
+                              <p className="text-[11px] text-slate-400">{req.document_id}</p>
+                            </td>
+                            <td className="px-4 py-3.5">
                               <Badge className="bg-slate-100 text-slate-600">{req.document_type}</Badge>
                             </td>
                             <td className="px-4 py-3.5">
@@ -584,29 +588,23 @@ export default function UserManagementPage() {
                             </td>
                             <td className="px-4 py-3.5 text-sm text-slate-500">{req.reviewed_by ?? '—'}</td>
                             <td className="px-4 py-3.5 text-xs text-slate-500">
+                              {req.status === 'approved' && req.reviewed_at
+                                ? new Date(new Date(req.reviewed_at).getTime() + 24 * 60 * 60 * 1000).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                : '—'}
+                            </td>
+                            <td className="px-4 py-3.5 text-xs text-slate-500">
                               {new Date(req.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
                             </td>
                             <td className="px-4 py-3.5">
                               {req.status === 'pending' && canReviewDocAccess && (
                                 <div className="flex items-center gap-1.5">
-                                  {(currentUser?.role === 'DPDA' || currentUser?.role === 'DPDO') && (
-                                    <button
-                                      onClick={() => handleDocAccessReview(req.id)}
-                                      disabled={processingDocReq === req.id}
-                                      className="text-[11px] font-bold px-2.5 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition disabled:opacity-50"
-                                    >
-                                      👁 Review
-                                    </button>
-                                  )}
-                                  {currentUser?.role === 'PD' && (
-                                    <button
-                                      onClick={() => handleDocAccessApprove(req.id)}
-                                      disabled={processingDocReq === req.id}
-                                      className="text-[11px] font-bold px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition disabled:opacity-50"
-                                    >
-                                      {processingDocReq === req.id ? '…' : '✅ Approve'}
-                                    </button>
-                                  )}
+                                  <button
+                                    onClick={() => handleDocAccessApprove(req.id)}
+                                    disabled={processingDocReq === req.id}
+                                    className="text-[11px] font-bold px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition disabled:opacity-50"
+                                  >
+                                    {processingDocReq === req.id ? '…' : '✅ Approve'}
+                                  </button>
                                   <button
                                     onClick={() => rejectDocDisc.open(req)}
                                     disabled={processingDocReq === req.id}

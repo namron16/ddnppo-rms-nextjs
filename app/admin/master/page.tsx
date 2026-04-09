@@ -793,9 +793,14 @@ export default function MasterPage() {
                       )}
                     </div>
                   ) : (
-                    /* Blurred attachments for restricted users */
-                    <div className="relative rounded-xl overflow-hidden">
-                      <div className="bg-white border border-slate-200 rounded-xl p-6" style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none' }}>
+                    /* Blurred attachments for restricted users with request-to-P1 action */
+                    <EnhancedDocumentGuard
+                      documentId={selection.id}
+                      documentType="master"
+                      documentTitle={selection.title}
+                      canView={selection.canView ?? isPrivileged}
+                    >
+                      <div className="bg-white border border-slate-200 rounded-xl p-6">
                         <div className="space-y-3">
                           {[1, 2, 3].map(i => (
                             <div key={i} className="flex items-center gap-3 h-12 bg-slate-50 rounded-lg px-4">
@@ -808,14 +813,7 @@ export default function MasterPage() {
                           ))}
                         </div>
                       </div>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="flex flex-col items-center gap-2 bg-white/95 px-5 py-4 rounded-2xl border border-slate-200 shadow-lg text-center">
-                          <Lock size={20} className="text-slate-500" />
-                          <p className="text-[13px] font-extrabold text-slate-700">Restricted Document</p>
-                          <p className="text-[11px] text-slate-500 max-w-[180px]">You do not have permission to view this file.</p>
-                        </div>
-                      </div>
-                    </div>
+                    </EnhancedDocumentGuard>
                   )}
                 </div>
               )}

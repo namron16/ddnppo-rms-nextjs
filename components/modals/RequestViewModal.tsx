@@ -177,7 +177,7 @@ export function RequestViewModal({
                 {existingRequest.status === 'pending' &&
                   'Your request is awaiting P1 review. You will be notified once a decision is made.'}
                 {existingRequest.status === 'approved' &&
-                  'Your request has been approved. You now have access to this document.'}
+                  'Your request has been approved. You now have view-only access to this document for 24 hours.'}
                 {existingRequest.status === 'rejected' &&
                   'Your request was not approved at this time.'}
               </p>
