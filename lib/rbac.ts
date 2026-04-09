@@ -164,6 +164,12 @@ export async function canAdminViewDocument(
 ): Promise<boolean> {
   if (FULL_ACCESS_ROLES.includes(adminId)) return true
 
+  // Check if role is permanently tagged for this document (master docs only)
+  if (documentType === 'master') {
+    const taggedRoles = await getDocumentTaggedRoles(documentId, 'master')
+    if (isRoleTaggedForDocument(adminId, taggedRoles)) return true
+  }
+
   const { data, error } = await supabase
     .from('document_visibility')
     .select('can_view, granted_at, granted_by')
@@ -230,13 +236,46 @@ export async function getBatchVisibility(
 }
 
 /**
+ * Parse tagged admin access from comma-separated string to array.
+ */
+export function parseTaggedAdminAccess(csvString: string | null | undefined): AdminRole[] {
+  if (!csvString) return []
+  return csvString
+    .split(',')
+    .map(s => s.trim() as AdminRole)
+    .filter(s => s.length > 0)
+}
+
+/**
+ * Check if an admin role is in the tagged access list.
+ */
+export function isRoleTaggedForDocument(role: AdminRole, taggedRoles: AdminRole[] | string | null | undefined): boolean {
+  if (!taggedRoles) return false
+  const parsed = typeof taggedRoles === 'string' ? parseTaggedAdminAccess(taggedRoles) : taggedRoles
+  return parsed.includes(role)
+}
+
+/**
  * Get the list of tagged admin IDs for a document (baseline access, set by P1).
- * Excludes temporary grants from request approvals.
+ * Reads from the master_documents.tagged_admin_access field.
  */
 export async function getDocumentTaggedRoles(
   documentId: string,
   documentType: DocType
 ): Promise<AdminRole[]> {
+  // For master documents, read from the master_documents table
+  if (documentType === 'master') {
+    const { data, error } = await supabase
+      .from('master_documents')
+      .select('tagged_admin_access')
+      .eq('id', documentId)
+      .maybeSingle()
+    
+    if (error || !data) return []
+    return parseTaggedAdminAccess(data.tagged_admin_access)
+  }
+
+  // For other document types, fall back to visibility table
   const { data, error } = await supabase
     .from('document_visibility')
     .select('admin_id')

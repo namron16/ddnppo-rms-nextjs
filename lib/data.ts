@@ -25,6 +25,7 @@ export async function getMasterDocuments(): Promise<(MasterDocument & { fileUrl?
   return (data ?? []).map(d => ({
     id: d.id, title: d.title, level: d.level, type: d.type,
     date: d.date, size: d.size, tag: d.tag, fileUrl: d.file_url ?? undefined,
+    taggedAdminAccess: d.tagged_admin_access ? d.tagged_admin_access.split(',').map((s: string) => s.trim()) : undefined,
   }))
 }
 
@@ -32,13 +33,17 @@ export async function addMasterDocument(doc: MasterDocument & { fileUrl?: string
   const { error } = await supabase.from('master_documents').insert({
     id: doc.id, title: doc.title, level: doc.level, type: doc.type,
     date: doc.date, size: doc.size, tag: doc.tag, file_url: doc.fileUrl ?? null,
+    tagged_admin_access: doc.taggedAdminAccess ? doc.taggedAdminAccess.join(',') : null,
   })
   if (error) console.warn('Supabase unavailable (add master_document):', error.message)
 }
 
 export async function updateMasterDocument(doc: MasterDocument & { fileUrl?: string }): Promise<void> {
   const { error } = await supabase.from('master_documents')
-    .update({ title: doc.title, level: doc.level, type: doc.type, date: doc.date, tag: doc.tag })
+    .update({
+      title: doc.title, level: doc.level, type: doc.type, date: doc.date, tag: doc.tag,
+      tagged_admin_access: doc.taggedAdminAccess ? doc.taggedAdminAccess.join(',') : null,
+    })
     .eq('id', doc.id)
   if (error) console.warn('Supabase unavailable (update master_document):', error.message)
 }
