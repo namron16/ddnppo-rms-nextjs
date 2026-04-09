@@ -286,6 +286,7 @@ export default function ClassifiedDocumentsPage() {
                           documentType="daily_journal"
                           documentTitle={doc.title}
                           canView={doc.canView ?? isPrivileged}
+                          compact
                         >
                           <span className="mr-2">📒</span>
                           <span className="font-semibold text-sm text-slate-800">{doc.title}</span>

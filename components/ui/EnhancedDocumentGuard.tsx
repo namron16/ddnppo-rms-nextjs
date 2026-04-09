@@ -212,13 +212,34 @@ function CompactBlurredGuard({
 }: GuardVariantProps) {
   return (
     <>
-      <span className="relative inline-flex items-center gap-1 group cursor-default">
+      <span className="relative inline-flex items-center gap-1.5 group">
         <span
           style={{ filter: 'blur(3.5px)', pointerEvents: 'none', userSelect: 'none' }}
         >
           {children}
         </span>
         <Lock size={11} className="text-slate-400 flex-shrink-0" />
+
+        {needsRequest && (!existingRequest || existingRequest.status === 'rejected') && (
+          <button
+            type="button"
+            onClick={onRequestClick}
+            className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition"
+          >
+            Request
+          </button>
+        )}
+
+        {existingRequest?.status === 'pending' && (
+          <button
+            type="button"
+            onClick={onRequestClick}
+            className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition"
+          >
+            Pending
+          </button>
+        )}
+
         {/* Hover tooltip */}
         <div className="absolute left-0 top-full mt-1.5 z-50 opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-150">
           <div className="bg-slate-900 text-white text-[11px] font-medium px-3 py-2 rounded-lg shadow-xl whitespace-nowrap max-w-[220px]">
@@ -227,7 +248,7 @@ function CompactBlurredGuard({
             ) : existingRequest?.status === 'rejected' ? (
               '❌ Access denied — submit new request'
             ) : needsRequest ? (
-              'Click to request view access'
+              'Click Request to ask P1 for access'
             ) : (
               '🔒 You don\'t have access to this document'
             )}
