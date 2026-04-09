@@ -230,7 +230,29 @@ export async function getBatchVisibility(
 }
 
 /**
- * Get the list of tagged admin IDs for a document (for editing).
+ * Get the list of tagged admin IDs for a document (baseline access, set by P1).
+ * Excludes temporary grants from request approvals.
+ */
+export async function getDocumentTaggedRoles(
+  documentId: string,
+  documentType: DocType
+): Promise<AdminRole[]> {
+  const { data, error } = await supabase
+    .from('document_visibility')
+    .select('admin_id')
+    .eq('document_id',   documentId)
+    .eq('document_type', documentType)
+    .eq('can_view',      true)
+    .is('granted_by', null)   // Only tagged, not temporary grants
+    .is('granted_at', null)
+
+  if (error) return []
+  return (data ?? []).map((r: any) => r.admin_id as AdminRole)
+}
+
+/**
+ * Get the list of all admin IDs with visibility for a document (tagged + temporary grants).
+ * Used for batch operations; prefer getDocumentTaggedRoles for display/control logic.
  */
 export async function getDocumentVisibility(
   documentId: string,
