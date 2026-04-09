@@ -13,7 +13,7 @@ export function AddUserModal({ open, onClose }: Props) {
   const { toast } = useToast()
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
-    firstName: '', lastName: '', email: '', role: 'officer', rank: '',
+    firstName: '', lastName: '', email: '', role: 'officer', rank: '', department: '',
   })
 
   const field = (key: string, value: string) => {
@@ -30,7 +30,7 @@ export function AddUserModal({ open, onClose }: Props) {
     setErrors({})
     toast.success(`User "${result.data.firstName} ${result.data.lastName}" created. A temporary password has been sent.`)
     onClose()
-    setForm({ firstName: '', lastName: '', email: '', role: 'officer', rank: '' })
+    setForm({ firstName: '', lastName: '', email: '', role: 'officer', rank: '', department: '' })
   }
 
   const cls = (f: string) =>
@@ -75,6 +75,18 @@ export function AddUserModal({ open, onClose }: Props) {
           <input className={cls('rank')} placeholder="e.g. P/Maj., P/Insp., P/Col."
             value={form.rank} onChange={e => field('rank', e.target.value)} />
           {errors.rank && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.rank}</p>}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">🏢 Department / Unit</label>
+          <input className={cls('department')} placeholder="e.g. Operations, Intelligence, Administration"
+            value={form.department} onChange={e => field('department', e.target.value)} />
+          {errors.department && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.department}</p>}
+          {form.department && (
+            <div className="mt-2 inline-block px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-full text-[11px] font-medium text-blue-700">
+              📌 {form.department}
+            </div>
+          )}
         </div>
 
         <div>
