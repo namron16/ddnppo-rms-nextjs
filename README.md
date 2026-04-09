@@ -36,7 +36,6 @@ ddnppo-rms-nextjs/
 │       ├── log-history/page.tsx         ← Activity Logs: action filter, CSV export toast
 │       ├── user-management/page.tsx     ← Users: search, add modal, delete confirm
 │       ├── archive/page.tsx             ← Archive: restore + delete confirm dialogs
-│       └── settings/page.tsx            ← Settings form: all fields + save toast
 │
 ├── components/
 │   ├── layout/
@@ -127,7 +126,6 @@ open http://localhost:3000
 | `/admin/log-history`        | Admin   | Activity Log History              |
 | `/admin/user-management`    | Admin   | User Management                   |
 | `/admin/archive`            | Admin   | Archived Documents                |
-| `/admin/settings`           | Admin   | System Settings                   |
 
 ---
 

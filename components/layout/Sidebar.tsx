@@ -7,9 +7,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import LogoutConfirmModal from '@/components/modals/LogoutConfirmModal'
-import { AdminProfileModal } from '@/components/modals/AdminProfileModal'
-import { NotificationBell } from '@/components/ui/NotificationBell'
-import { ViewRequestBell } from '@/components/ui/ViewRequestBell'
 
 interface NavItem {
   label: string
@@ -39,7 +36,6 @@ const ADMIN_NAV: NavItem[] = [
   { label: 'Log History',     icon: '📊', href: '/admin/log-history' },
   { label: 'User Management', icon: '👥', href: '/admin/user-management' },
   { label: 'Archive',         icon: '🗄️', href: '/admin/archive' },
-  { label: 'Settings',        icon: '⚙️', href: '/admin/settings' },
 ]
 
 function NavLink({ item, active, onNavigate }: {
@@ -70,7 +66,6 @@ export function Sidebar() {
   const pathname = usePathname()
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
-  const [showProfile, setShowProfile] = useState(false)
   const [pendingHref, setPendingHref] = useState<string | null>(null)
 
   useEffect(() => {
@@ -86,18 +81,9 @@ export function Sidebar() {
     setTimeout(() => { router.push('/login') }, 100)
   }
 
-  const roleInfo = user ? {
-    name: user.name,
-    email: `${user.role.toLowerCase()}@ddnppo.gov.ph`,
-    role: user.role,
-    initials: user.initials,
-    avatarColor: user.avatarColor,
-  } : null
-
   // Show management nav only for PD and P1
   const canSeeAdmin = user && ['PD', 'P1'].includes(user.role)
   const canSeeP2 = user?.role === 'P2';
-  // P1 gets the view request bell, all get notification bell
   const isP1 = user?.role === 'P1'
 
   return (
@@ -164,38 +150,6 @@ export function Sidebar() {
 
         {/* User footer */}
         <div className="mt-auto px-3 py-4 border-t border-white/10">
-          <div className="flex items-center gap-2 mb-1">
-            {/* P1 View Request Bell */}
-            {isP1 && (
-              <div className="flex-shrink-0">
-                <ViewRequestBell />
-              </div>
-            )}
-
-            {/* Standard Notification Bell */}
-            <div className="flex-shrink-0">
-              <NotificationBell />
-            </div>
-
-            {/* Profile button */}
-            <button
-              onClick={() => setShowProfile(true)}
-              className="flex-1 flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-white/10 transition group text-left"
-              title="View profile"
-            >
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0 ring-2 ring-transparent group-hover:ring-white/20 transition"
-                style={{ background: user?.avatarColor ?? '#f0b429', color: '#0f1c35' }}
-              >
-                {user?.initials ?? 'AD'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-white text-[12px] font-semibold truncate">{user?.role}</div>
-                <div className="text-white/45 text-[10px] truncate">{user?.level}</div>
-              </div>
-            </button>
-          </div>
-
           {/* Logout */}
           <button
             onClick={() => setShowLogoutConfirm(true)}
@@ -215,11 +169,6 @@ export function Sidebar() {
         open={showLogoutConfirm}
         onConfirm={handleLogoutConfirm}
         onCancel={() => setShowLogoutConfirm(false)}
-      />
-      <AdminProfileModal
-        open={showProfile}
-        onClose={() => setShowProfile(false)}
-        user={roleInfo}
       />
     </>
   )
