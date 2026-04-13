@@ -12,6 +12,7 @@ import { ToolbarSelect } from '@/components/ui/Toolbar'
 import { useToast } from '@/components/ui/Toast'
 import { AddJournalEntryModal } from '@/components/modals/AddJournalEntryModal'
 import { useDisclosure, useModal, useSearch } from '@/hooks'
+import { logViewDocument } from '@/lib/adminLogger'
 import type { AddJournalEntryInput } from '@/lib/validations'
 import type { JournalEntry } from '@/types'
 import { addArchivedDoc, addDailyJournal, archiveDailyJournal, getDailyJournals, updateDailyJournal, type DailyJournalRecord } from '@/lib/data'
@@ -337,7 +338,16 @@ export default function DailyJournalsPage() {
                       <td className="px-4 py-3.5 align-top text-sm text-slate-600">{entry.attachments}</td>
                       <td className="px-4 py-3.5 align-top">
                         <div className="flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" onClick={() => viewDisc.open(entry)}>View</Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              viewDisc.open(entry)
+                              logViewDocument(entry.title).catch(() => {})
+                            }}
+                          >
+                            View
+                          </Button>
                           <Button variant="outline" size="sm" onClick={() => editDisc.open(entry)}>Edit</Button>
                           <Button variant="danger" size="sm" onClick={() => archiveDisc.open(entry)}>Archive</Button>
                           <Button variant="ghost" size="sm" onClick={() => navigator.clipboard?.writeText(entry.title)}>Copy title</Button>

@@ -24,6 +24,7 @@ import {
 } from '@/lib/data'
 import { supabase }             from '@/lib/supabase'
 import { statusBadgeClass }     from '@/lib/utils'
+import { logViewDocument }      from '@/lib/adminLogger'
 import type { SpecialOrder }    from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -931,6 +932,11 @@ export default function AdminOrdersPage() {
     )
   }, [orders, query, statusFilter])
 
+  function handleViewFile(fileUrl: string, fileName: string) {
+    setViewerFile({ url: fileUrl, name: fileName })
+    logViewDocument(fileName).catch(() => {})
+  }
+
   return (
     <>
       <PageHeader title="Admin Orders" />
@@ -1026,7 +1032,7 @@ export default function AdminOrdersPage() {
                   onUpload={handleUpload}
                   uploadingId={uploadingId}
                   onArchiveOrder={() => selectedOrder && archiveDisc.open(selectedOrder)}
-                  onViewFile={(url, name) => setViewerFile({ url, name })}
+                  onViewFile={handleViewFile}
                   onArchiveAttachment={att => archiveAttDisc.open(att)}
                   onRestoreAttachment={handleRestoreAttachment}
                   onDrillDown={handleDrillDown}

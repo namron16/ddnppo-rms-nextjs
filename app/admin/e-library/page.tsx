@@ -12,6 +12,8 @@ import { ToolbarSelect }         from '@/components/ui/Toolbar'
 import { Modal }                 from '@/components/ui/Modal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }              from '@/components/ui/Toast'
+import { Paperclip } from 'lucide-react'
+import { logViewDocument }       from '@/lib/adminLogger'
 import {
   getLibraryItems,
   addLibraryItem,
@@ -460,7 +462,16 @@ export default function LibraryPage() {
                       <td className="px-4 py-3.5 text-sm text-slate-500">{item.dateAdded}</td>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => viewDisc.open(item)}>👁</Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              viewDisc.open(item)
+                              logViewDocument(item.title).catch(() => {})
+                            }}
+                          >
+                            👁
+                          </Button>
                           {item.fileUrl && (
                             <a href={item.fileUrl} download target="_blank" rel="noopener noreferrer">
                               <Button variant="ghost" size="sm">⬇</Button>
