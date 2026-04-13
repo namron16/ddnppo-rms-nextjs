@@ -3,7 +3,7 @@
 // Clean single-overlay restricted document view
 
 import { useEffect, useState, useCallback } from 'react'
-import { Lock, ShieldOff, Clock, AlertCircle, RotateCcw } from 'lucide-react'
+import { Lock, ShieldOff, Clock, RotateCcw } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useToast } from '@/components/ui/Toast'
 import { RequestViewModal } from '@/components/modals/RequestViewModal'
@@ -192,6 +192,7 @@ interface GuardProps {
 }
 
 // ── Full overlay guard ─────────────────────────
+// Single parent container: blur the whole area, one centered overlay.
 
 function FullGuard({
   documentId,
@@ -209,28 +210,45 @@ function FullGuard({
 
   return (
     <>
-      {/* Single unified container */}
-      <div className="restricted-wrapper relative rounded-xl overflow-hidden">
+      {/*
+        ┌─────────────────────────────────────────────────────┐
+        │  Single relative container                          │
+        │  ┌───────────────────────────────────────────────┐  │
+        │  │  Blurred children (the entire document area)  │  │
+        │  └───────────────────────────────────────────────┘  │
+        │  ┌───────────────────────────────────────────────┐  │
+        │  │  Absolute overlay — one centered card         │  │
+        │  └───────────────────────────────────────────────┘  │
+        └─────────────────────────────────────────────────────┘
+      */}
+      <div className="relative rounded-xl overflow-hidden">
 
-        {/* ONE blurred layer covering everything */}
+        {/* ── ONE blurred layer covering the ENTIRE children area ── */}
         <div
           aria-hidden="true"
-          className="restricted-blur select-none pointer-events-none"
-          style={{ filter: 'blur(6px)', opacity: 0.45, userSelect: 'none', WebkitUserSelect: 'none' }}
+          style={{
+            filter: 'blur(6px)',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            opacity: 0.45,
+          }}
         >
           {children}
         </div>
 
-        {/* Single centered overlay */}
-        <div className="restricted-overlay absolute inset-0 flex items-center justify-center bg-slate-900/20 backdrop-blur-[1px]">
+        {/* ── ONE centered overlay ── */}
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{ pointerEvents: 'auto' }}
+        >
           <div
-            className="restricted-card animate-fade-up"
+            className="animate-fade-up flex flex-col items-center text-center"
             style={{
               background: 'white',
               borderRadius: '16px',
               padding: '28px 32px',
               boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-              textAlign: 'center',
               maxWidth: '320px',
               width: '90%',
               border: '1px solid rgba(226, 232, 240, 0.8)',
@@ -238,18 +256,20 @@ function FullGuard({
           >
             {/* Icon */}
             <div
-              className="mx-auto mb-4 flex items-center justify-center rounded-2xl"
+              className="mb-4 flex items-center justify-center rounded-2xl"
               style={{
                 width: '56px',
                 height: '56px',
-                background: status === 'pending'
-                  ? 'linear-gradient(135deg, #fef3c7, #fde68a)'
-                  : status === 'rejected'
+                background:
+                  status === 'pending'
+                    ? 'linear-gradient(135deg, #fef3c7, #fde68a)'
+                    : status === 'rejected'
                     ? 'linear-gradient(135deg, #fee2e2, #fecaca)'
                     : 'linear-gradient(135deg, #eff6ff, #dbeafe)',
-                border: status === 'pending'
-                  ? '1.5px solid #fbbf24'
-                  : status === 'rejected'
+                border:
+                  status === 'pending'
+                    ? '1.5px solid #fbbf24'
+                    : status === 'rejected'
                     ? '1.5px solid #f87171'
                     : '1.5px solid #93c5fd',
               }}
@@ -264,33 +284,44 @@ function FullGuard({
             </div>
 
             {/* Title */}
-            <h3 className="text-[15px] font-bold text-slate-800 mb-1.5 leading-snug">
+            <h3
+              className="text-[15px] font-bold text-slate-800 mb-1.5 leading-snug"
+            >
               {status === 'pending'
                 ? 'Access Request Pending'
                 : status === 'rejected'
-                  ? 'Access Request Rejected'
-                  : 'Restricted Document'}
+                ? 'Access Request Rejected'
+                : 'Restricted Document'}
             </h3>
 
-            {/* Document name */}
+            {/* Document name pill */}
             {documentTitle && (
-              <p className="text-[11px] font-semibold text-slate-400 mb-3 truncate px-2 bg-slate-50 rounded-lg py-1.5 border border-slate-100">
-                📄 {documentTitle.length > 38 ? documentTitle.slice(0, 37) + '…' : documentTitle}
+              <p
+                className="text-[11px] font-semibold text-slate-400 mb-3 truncate px-2 py-1.5 rounded-lg border"
+                style={{
+                  background: '#f8fafc',
+                  borderColor: '#e2e8f0',
+                  maxWidth: '100%',
+                }}
+              >
+                📄 {documentTitle.length > 38
+                  ? documentTitle.slice(0, 37) + '…'
+                  : documentTitle}
               </p>
             )}
 
-            {/* Subtitle / status message */}
+            {/* Status message */}
             <p className="text-[12px] text-slate-500 mb-4 leading-relaxed">
               {status === 'pending'
                 ? 'Your request is awaiting approval from the Records Officer (P1).'
                 : status === 'rejected'
-                  ? existingRequest?.rejection_reason
-                    ? existingRequest.rejection_reason
-                    : 'Your access request was not approved. You may submit a new request.'
-                  : 'You do not have permission to view this document.'}
+                ? existingRequest?.rejection_reason
+                  ? existingRequest.rejection_reason
+                  : 'Your access request was not approved. You may submit a new request.'
+                : 'You do not have permission to view this document.'}
             </p>
 
-            {/* CTA button */}
+            {/* CTA */}
             {needsRequest && !status && (
               <button
                 onClick={onRequestClick}
@@ -310,7 +341,7 @@ function FullGuard({
 
             {status === 'pending' && (
               <div
-                className="flex items-center justify-center gap-2 text-[12px] font-semibold py-2 px-4 rounded-xl"
+                className="flex items-center justify-center gap-2 text-[12px] font-semibold py-2 px-4 rounded-xl w-full"
                 style={{
                   background: '#fef3c7',
                   color: '#92400e',
@@ -381,7 +412,7 @@ function CompactGuard({
   return (
     <>
       <span className="relative inline-flex items-center gap-1.5 group">
-        {/* Blurred content */}
+        {/* Single blurred span wrapping all children */}
         <span
           style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none' }}
           aria-hidden="true"
@@ -448,11 +479,10 @@ function CompactGuard({
             {status === 'pending'
               ? '⏳ Access request is pending P1 review'
               : status === 'rejected'
-                ? '❌ Access denied — you can submit a new request'
-                : needsRequest
-                  ? '🔒 Click Request to ask P1 for access'
-                  : '🔒 Restricted — contact P1 for access'}
-            {/* Tooltip arrow */}
+              ? '❌ Access denied — you can submit a new request'
+              : needsRequest
+              ? '🔒 Click Request to ask P1 for access'
+              : '🔒 Restricted — contact P1 for access'}
             <span
               style={{
                 display: 'block',
