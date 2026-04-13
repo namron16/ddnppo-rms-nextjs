@@ -13,8 +13,8 @@ import { ToolbarSelect }    from '@/components/ui/Toolbar'
 import { Modal }            from '@/components/ui/Modal'
 import { AddDocumentModal } from '@/components/modals/AddDocumentModal'
 import { ApprovalWorkflowModal }  from '@/components/modals/ApprovalWorkflowModal'
+import { RequestViewModal } from '@/components/modals/RequestViewModal'
 import { ApprovalStatusBadge } from '@/components/ui/BlurredDocumentGuard'
-import { EnhancedDocumentGuard } from '@/components/ui/EnhancedDocumentGuard'
 import { VisibilityTagSelector } from '@/components/ui/VisibilityTagSelector'
 import { UploadGuard }      from '@/components/ui/UploadGuard'
 import { useModal, useDisclosure } from '@/hooks'
@@ -37,6 +37,7 @@ import {
   canUploadDocuments, canReviewDocuments, canFinalApprove,
   hasFullDocumentAccess, ROLE_META,
 } from '@/lib/permissions'
+import { roleNeedsViewRequest } from '@/lib/viewRequests'
 import type { MasterDocument, DocLevel } from '@/types'
 import type { AdminRole } from '@/lib/auth'
 
@@ -44,6 +45,7 @@ type DocWithUrl = MasterDocument & { fileUrl?: string }
 type DocEnriched = DocWithUrl & {
   approval?: DocumentApproval | null
   canView?: boolean
+  isRestricted: boolean
   taggedRoles?: AdminRole[]
 }
 
@@ -308,6 +310,7 @@ export default function MasterPage() {
   const [viewerFile,     setViewerFile]     = useState<{ url: string; name: string } | null>(null)
   const [activeApproval, setActiveApproval] = useState<DocumentApproval | null>(null)
   const [pendingApprovals, setPending]      = useState<DocumentApproval[]>([])
+  const [requestViewOpen, setRequestViewOpen] = useState(false)
 
   const archiveAttDisc = useDisclosure<DocAttachment>()
   const uploadModal    = useModal()
@@ -347,7 +350,7 @@ export default function MasterPage() {
             const approval = await getApproval(doc.id, 'master')
             const canView  = isPrivileged ? true : visibleIds.has(doc.id)
             const taggedRoles = isP1 ? await getDocumentTaggedRoles(doc.id, 'master') : []
-            return { ...doc, approval, canView, taggedRoles }
+            return { ...doc, approval, canView, isRestricted: !canView, taggedRoles }
           })
         )
         setDocuments(enriched)
@@ -387,6 +390,58 @@ export default function MasterPage() {
     loadAll()
   }, [user, isPrivileged, isP1, isReviewer, isPD])
 
+  useEffect(() => {
+    if (!user || isPrivileged || !selection) return
+
+    const channel = supabase
+      .channel(`master_visibility_${selection.id}_${user.role}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'document_visibility',
+        filter: `document_id=eq.${selection.id}`,
+      }, payload => {
+        const row = payload.new as any
+        if (row.admin_id !== user.role) return
+        const canView = row.can_view === true
+
+        setDocuments(prev => prev.map(doc => (
+          doc.id === selection.id
+            ? { ...doc, canView, isRestricted: !canView }
+            : doc
+        )))
+
+        setSelection(prev => prev && prev.id === selection.id
+          ? { ...prev, canView, isRestricted: !canView }
+          : prev
+        )
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'document_visibility',
+        filter: `document_id=eq.${selection.id}`,
+      }, payload => {
+        const row = payload.new as any
+        if (row.admin_id !== user.role) return
+        const canView = row.can_view === true
+
+        setDocuments(prev => prev.map(doc => (
+          doc.id === selection.id
+            ? { ...doc, canView, isRestricted: !canView }
+            : doc
+        )))
+
+        setSelection(prev => prev && prev.id === selection.id
+          ? { ...prev, canView, isRestricted: !canView }
+          : prev
+        )
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [user, isPrivileged, selection?.id])
+
   async function handleAdd(newDoc: DocWithUrl) {
     await addMasterDocument(newDoc)
     await createApproval(newDoc.id, 'master', newDoc.title)
@@ -394,6 +449,7 @@ export default function MasterPage() {
       ...newDoc,
       approval: null,
       canView: true,
+      isRestricted: false,
       taggedRoles: (newDoc.taggedAdminAccess ?? []) as AdminRole[],
     }
     setDocuments(prev => [...prev, enriched])
@@ -407,6 +463,7 @@ export default function MasterPage() {
       ? {
           ...d,
           ...updated,
+          isRestricted: d.isRestricted,
           taggedRoles: (updated.taggedAdminAccess ?? []) as AdminRole[],
         }
       : d
@@ -415,6 +472,7 @@ export default function MasterPage() {
       setSelection(prev => prev ? {
         ...prev,
         ...updated,
+        isRestricted: prev.isRestricted,
         taggedRoles: (updated.taggedAdminAccess ?? []) as AdminRole[],
       } : prev)
     }
@@ -504,6 +562,9 @@ export default function MasterPage() {
     if (!selection) return []
     return (attachmentsMap.get(selection.id) ?? []).filter(a => !a.parent_attachment_id)
   }, [selection, attachmentsMap])
+
+  const selectedDocumentRestricted = !!selection?.isRestricted
+  const canRequestAccess = !!selection && !!user && roleNeedsViewRequest(user.role as AdminRole)
 
   return (
     <>
@@ -635,33 +696,27 @@ export default function MasterPage() {
             </div>
 
             {/* Right: detail panel */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {!selection ? (
-                <div className="h-full flex items-center justify-center">
-                  <EmptyState
-                    icon="📄"
-                    title="Select a document"
-                    description="Click any document from the list to view its details."
-                    action={
-                      isP1 ? <Button variant="primary" size="sm" onClick={uploadModal.open}>+ Upload Document</Button> : undefined
-                    }
-                  />
-                </div>
-              ) : (
-                <div className="animate-fade-up space-y-5">
+            <div className="relative flex-1 min-h-0 overflow-hidden">
+              <div className={`h-full overflow-y-auto p-6 transition-all duration-200 ${selectedDocumentRestricted ? 'pointer-events-none select-none blur-sm opacity-20' : ''}`}>
+                {!selection ? (
+                  <div className="h-full flex items-center justify-center">
+                    <EmptyState
+                      icon="📄"
+                      title="Select a document"
+                      description="Click any document from the list to view its details."
+                      action={
+                        isP1 ? <Button variant="primary" size="sm" onClick={uploadModal.open}>+ Upload Document</Button> : undefined
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div className="animate-fade-up space-y-5">
 
                   {/* Document header */}
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <EnhancedDocumentGuard
-                          documentId={selection.id}
-                          documentType="master"
-                          documentTitle={selection.title}
-                          canView={isPrivileged ? true : undefined}
-                        >
-                          <h2 className="text-lg font-extrabold text-slate-800">{selection.title}</h2>
-                        </EnhancedDocumentGuard>
+                        <h2 className="text-lg font-extrabold text-slate-800">{selection.title}</h2>
                         <Badge className={levelBadgeClass(selection.level)}>{selection.level}</Badge>
                         <Badge className="bg-blue-50 text-blue-700 border border-blue-200">{selection.tag}</Badge>
                         {selection.approval && (
@@ -703,36 +758,29 @@ export default function MasterPage() {
                     </div>
                   </div>
 
-                  {/* Primary file — viewers can request unblur access, P1 can approve */}
+                  {/* Primary file */}
                   {selection.fileUrl ? (
-                    <EnhancedDocumentGuard
-                      documentId={selection.id}
-                      documentType="master"
-                      documentTitle={selection.title}
-                      canView={isPrivileged ? true : undefined}
-                    >
-                      <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
-                        <span className="text-lg flex-shrink-0">
-                          {selection.type === 'PDF' ? '📕' : selection.type === 'DOCX' ? '📘' : selection.type === 'XLSX' ? '📗' : '🖼️'}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
-                          <p className="text-xs text-blue-600 truncate">{selection.title}.{selection.type.toLowerCase()}</p>
-                        </div>
-                        <div className="flex gap-1.5 flex-shrink-0">
-                          <a href={selection.fileUrl} download target="_blank" rel="noopener noreferrer"
-                            className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
-                            ⬇ Download
-                          </a>
-                          <button
-                            onClick={() => setViewerFile({ url: selection.fileUrl!, name: selection.title })}
-                            className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
-                          >
-                            👁 View
-                          </button>
-                        </div>
+                    <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+                      <span className="text-lg flex-shrink-0">
+                        {selection.type === 'PDF' ? '📕' : selection.type === 'DOCX' ? '📘' : selection.type === 'XLSX' ? '📗' : '🖼️'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-blue-800 truncate">Primary file</p>
+                        <p className="text-xs text-blue-600 truncate">{selection.title}.{selection.type.toLowerCase()}</p>
                       </div>
-                    </EnhancedDocumentGuard>
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        <a href={selection.fileUrl} download target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
+                          ⬇ Download
+                        </a>
+                        <button
+                          onClick={() => setViewerFile({ url: selection.fileUrl!, name: selection.title })}
+                          className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
+                        >
+                          👁 View
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
 
                   {/* Visibility tagging info for P1 */}
@@ -766,79 +814,101 @@ export default function MasterPage() {
                     </div>
                   )}
 
-                  {/* Attachments — only shown to authorized users */}
-                  <EnhancedDocumentGuard
-                    documentId={selection.id}
-                    documentType="master"
-                    documentTitle={selection.title}
-                    canView={isPrivileged ? true : undefined}
-                  >
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-                        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Attachments</span>
-                        {/* P1-only attach button */}
-                        {isP1 && (
-                          <input
-                            type="file"
-                            multiple
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
-                            id={`attach-${selection.id}`}
-                            className="hidden"
-                            onChange={e => {
-                              if (e.target.files && e.target.files.length > 0)
-                                handleUpload(selection.id, null, e.target.files)
-                              e.target.value = ''
-                            }}
-                          />
-                        )}
-                        {isP1 && (
-                          <Button variant="primary" size="sm" disabled={!!uploadingId}
-                            onClick={() => document.getElementById(`attach-${selection.id}`)?.click()}>
-                            + Attach file
-                          </Button>
-                        )}
-                      </div>
+                  {/* Attachments */}
+                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+                      <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Attachments</span>
+                      {/* P1-only attach button */}
+                      {isP1 && (
+                        <input
+                          type="file"
+                          multiple
+                          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+                          id={`attach-${selection.id}`}
+                          className="hidden"
+                          onChange={e => {
+                            if (e.target.files && e.target.files.length > 0)
+                              handleUpload(selection.id, null, e.target.files)
+                            e.target.value = ''
+                          }}
+                        />
+                      )}
+                      {isP1 && (
+                        <Button variant="primary" size="sm" disabled={!!uploadingId}
+                          onClick={() => document.getElementById(`attach-${selection.id}`)?.click()}>
+                          + Attach file
+                        </Button>
+                      )}
+                    </div>
 
-                      {currentAttachments.filter(a => !a.archived).length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-10 text-center">
-                          <FileText size={28} className="text-slate-300 mb-2" />
-                          <p className="text-sm font-semibold text-slate-500">No attachments yet</p>
-                          {isP1 && <p className="text-xs text-slate-400 mt-1">Click + Attach file to upload supporting documents.</p>}
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-slate-50">
-                          {currentAttachments.filter(a => !a.archived).map(att => {
-                            const fi = fileInfo(att.file_name)
-                            return (
-                              <div key={att.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 group transition">
-                                <span className="text-base flex-shrink-0">{fi.icon}</span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-semibold text-slate-800 truncate">{att.file_name}</p>
-                                  <p className="text-[11px] text-slate-400">{att.file_size} · {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
-                                </div>
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button onClick={() => setViewerFile({ url: att.file_url, name: att.file_name })}
-                                    className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
-                                    👁
-                                  </button>
-                                  <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
-                                    <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">⬇</button>
-                                  </a>
-                                  {/* Archive — P1 only */}
-                                  {isP1 && (
-                                    <button onClick={() => archiveAttDisc.open(att)}
-                                      className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition">
-                                      🗄️
-                                    </button>
-                                  )}
-                                </div>
+                    {currentAttachments.filter(a => !a.archived).length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-10 text-center">
+                        <FileText size={28} className="text-slate-300 mb-2" />
+                        <p className="text-sm font-semibold text-slate-500">No attachments yet</p>
+                        {isP1 && <p className="text-xs text-slate-400 mt-1">Click + Attach file to upload supporting documents.</p>}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-50">
+                        {currentAttachments.filter(a => !a.archived).map(att => {
+                          const fi = fileInfo(att.file_name)
+                          return (
+                            <div key={att.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 group transition">
+                              <span className="text-base flex-shrink-0">{fi.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-slate-800 truncate">{att.file_name}</p>
+                                <p className="text-[11px] text-slate-400">{att.file_size} · {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
                               </div>
-                            )
-                          })}
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => setViewerFile({ url: att.file_url, name: att.file_name })}
+                                  className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
+                                  👁
+                                </button>
+                                <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
+                                  <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">⬇</button>
+                                </a>
+                                {/* Archive — P1 only */}
+                                {isP1 && (
+                                  <button onClick={() => archiveAttDisc.open(att)}
+                                    className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded hover:bg-amber-100 transition">
+                                    🗄️
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  </div>
+                )}
+              </div>
+
+              {selection && selectedDocumentRestricted && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/35 backdrop-blur-sm px-6">
+                  <div className="w-full max-w-lg rounded-3xl border border-slate-200/80 bg-white/95 shadow-2xl px-8 py-7 text-center">
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-red-600">
+                      <Lock size={26} />
+                    </div>
+                    <h3 className="text-xl font-extrabold text-slate-900">Restricted Document</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Restricted Document – You do not have permission to view this document and its attachments.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      All document content in this panel is hidden until access is granted.
+                    </p>
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+                      {canRequestAccess ? (
+                        <Button variant="primary" onClick={() => setRequestViewOpen(true)}>
+                          Request Access
+                        </Button>
+                      ) : (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-medium text-amber-800">
+                          Contact P1 to request access
                         </div>
                       )}
                     </div>
-                  </EnhancedDocumentGuard>
+                  </div>
                 </div>
               )}
             </div>
@@ -850,6 +920,16 @@ export default function MasterPage() {
       <AddDocumentModal open={uploadModal.isOpen} onClose={uploadModal.close} onAdd={handleAdd} />
       <ForwardModal doc={selection} open={forwardModal.isOpen} onClose={forwardModal.close} />
       <EditModal doc={selection} open={editModal.isOpen} onClose={editModal.close} onSave={handleSave} />
+      {selection && (
+        <RequestViewModal
+          open={requestViewOpen}
+          onClose={() => setRequestViewOpen(false)}
+          documentId={selection.id}
+          documentType="master"
+          documentTitle={selection.title}
+          onRequestSubmitted={() => setRequestViewOpen(false)}
+        />
+      )}
 
       {viewerFile && (
         <InlineFileViewerModal
