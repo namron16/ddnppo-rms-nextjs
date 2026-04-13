@@ -1,14 +1,9 @@
 'use client'
 // components/ui/EnhancedDocumentGuard.tsx
-// Drop-in replacement/enhancement for BlurredDocumentGuard.
-//
-// Fix: Tagged P2-P10 users now correctly see documents unblurred.
-// The previous version called hasApprovedViewRequest which missed the
-// tagged_admin_access baseline check. Now uses canAdminViewDocument from
-// rbac.ts which correctly checks both tagged_admin_access AND document_visibility.
+// Clean single-overlay restricted document view
 
 import { useEffect, useState, useCallback } from 'react'
-import { Lock } from 'lucide-react'
+import { Lock, ShieldOff, Clock, AlertCircle, RotateCcw } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useToast } from '@/components/ui/Toast'
 import { RequestViewModal } from '@/components/modals/RequestViewModal'
@@ -17,8 +12,6 @@ import {
   roleNeedsViewRequest,
   type DocumentViewRequest,
 } from '@/lib/viewRequests'
-// KEY FIX: Use canAdminViewDocument from rbac.ts instead of hasApprovedViewRequest
-// canAdminViewDocument correctly checks tagged_admin_access first, then document_visibility
 import { canAdminViewDocument, type DocType } from '@/lib/rbac'
 import { supabase } from '@/lib/supabase'
 import type { AdminRole } from '@/lib/auth'
@@ -28,9 +21,7 @@ interface EnhancedDocumentGuardProps {
   documentType: string
   documentTitle: string
   children: React.ReactNode
-  /** Preloaded canView state — if true, skips DB check entirely */
   canView?: boolean
-  /** Compact / inline blur mode (for table cells) */
   compact?: boolean
 }
 
@@ -53,16 +44,12 @@ export function EnhancedDocumentGuard({
   const checkAccess = useCallback(async () => {
     if (!user) { setCanView(false); setCheckingAccess(false); return }
 
-    // Full access roles bypass everything
     if (roleHasFullAccess(user.role as AdminRole)) {
       setCanView(true)
       setCheckingAccess(false)
       return
     }
 
-    // KEY FIX: Use canAdminViewDocument which checks tagged_admin_access FIRST
-    // This ensures P2-P10 tagged by P1 see documents clearly without needing
-    // to submit a separate view request.
     const hasAccess = await canAdminViewDocument(
       user.role as AdminRole,
       documentId,
@@ -70,7 +57,6 @@ export function EnhancedDocumentGuard({
     )
     setCanView(hasAccess)
 
-    // For users without access, load their existing request status for UI display
     if (!hasAccess && roleNeedsViewRequest(user.role as AdminRole)) {
       try {
         const { data } = await supabase
@@ -82,7 +68,6 @@ export function EnhancedDocumentGuard({
           .limit(1)
           .maybeSingle()
 
-        // Only show non-approved requests (approved ones should have granted access above)
         if (data && data.status !== 'approved') {
           setExistingRequest(data as DocumentViewRequest)
         }
@@ -95,7 +80,6 @@ export function EnhancedDocumentGuard({
   }, [user, documentId, documentType])
 
   useEffect(() => {
-    // If preloaded as true, trust it — no DB call needed
     if (preloadedCanView === true) {
       setCanView(true)
       setCheckingAccess(false)
@@ -104,192 +88,265 @@ export function EnhancedDocumentGuard({
     checkAccess()
   }, [preloadedCanView, checkAccess])
 
-  // Real-time: update canView when a visibility row is inserted/updated
+  // Real-time updates
   useEffect(() => {
     if (!user || roleHasFullAccess(user.role as AdminRole)) return
-    if (canView) return // already has access
+    if (canView) return
 
     const channel = supabase
       .channel(`doc_guard_${documentId}_${user.role}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'document_view_requests',
-          filter: `document_id=eq.${documentId}`,
-        },
-        (payload) => {
-          const updated = payload.new as DocumentViewRequest
-          if (updated.requester_id === user.role && updated.status === 'approved') {
-            // Re-run full access check (the visibility row should now exist)
-            checkAccess()
-          } else if (updated.requester_id === user.role) {
-            setExistingRequest(updated)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'document_visibility',
-          filter: `document_id=eq.${documentId}`,
-        },
-        (payload) => {
-          const row = payload.new as any
-          if (row.admin_id === user.role && row.can_view) {
-            setCanView(true)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'master_documents',
-          filter: `id=eq.${documentId}`,
-        },
-        () => {
-          // tagged_admin_access may have changed — re-check
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'document_view_requests',
+        filter: `document_id=eq.${documentId}`,
+      }, (payload) => {
+        const updated = payload.new as DocumentViewRequest
+        if (updated.requester_id === user.role && updated.status === 'approved') {
           checkAccess()
+        } else if (updated.requester_id === user.role) {
+          setExistingRequest(updated)
         }
-      )
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'document_visibility',
+        filter: `document_id=eq.${documentId}`,
+      }, (payload) => {
+        const row = payload.new as any
+        if (row.admin_id === user.role && row.can_view) {
+          setCanView(true)
+        }
+      })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [user, documentId, canView, checkAccess])
 
-  // Loading state
   if (checkingAccess) {
     if (compact) {
       return <span className="animate-pulse bg-slate-200 rounded h-4 w-24 inline-block" />
     }
-    return (
-      <div className="animate-pulse bg-slate-100 rounded-lg h-20 w-full" />
-    )
+    return <div className="animate-pulse bg-slate-100 rounded-lg h-20 w-full" />
   }
 
-  // Has access → show content normally
   if (canView) return <>{children}</>
 
-  // No access: compact inline blur
+  const needsRequest = !!(user && roleNeedsViewRequest(user.role as AdminRole))
+
   if (compact) {
     return (
-      <CompactBlurredGuard
+      <CompactGuard
         documentId={documentId}
         documentType={documentType}
         documentTitle={documentTitle}
         existingRequest={existingRequest}
+        requestModalOpen={requestModalOpen}
         onRequestClick={() => setRequestModalOpen(true)}
-        onRequestSubmitted={req => {
+        onRequestModalClose={() => setRequestModalOpen(false)}
+        onRequestSubmitted={(req) => {
           setExistingRequest(req)
           setRequestModalOpen(false)
         }}
-        requestModalOpen={requestModalOpen}
-        onRequestModalClose={() => setRequestModalOpen(false)}
-        needsRequest={!!(user && roleNeedsViewRequest(user.role as AdminRole))}
+        needsRequest={needsRequest}
       >
         {children}
-      </CompactBlurredGuard>
+      </CompactGuard>
     )
   }
 
-  // No access: full blurred overlay
   return (
-    <FullBlurredGuard
+    <FullGuard
       documentId={documentId}
       documentType={documentType}
       documentTitle={documentTitle}
       existingRequest={existingRequest}
+      requestModalOpen={requestModalOpen}
       onRequestClick={() => setRequestModalOpen(true)}
-      onRequestSubmitted={req => {
+      onRequestModalClose={() => setRequestModalOpen(false)}
+      onRequestSubmitted={(req) => {
         setExistingRequest(req)
         setRequestModalOpen(false)
       }}
-      requestModalOpen={requestModalOpen}
-      onRequestModalClose={() => setRequestModalOpen(false)}
-      needsRequest={!!(user && roleNeedsViewRequest(user.role as AdminRole))}
+      needsRequest={needsRequest}
     >
       {children}
-    </FullBlurredGuard>
+    </FullGuard>
   )
 }
 
-// ── Shared props for both guard variants ───────
-interface GuardVariantProps {
+// ── Shared props ──────────────────────────────
+
+interface GuardProps {
   documentId: string
   documentType: string
   documentTitle: string
   existingRequest: DocumentViewRequest | null
-  onRequestClick: () => void
-  onRequestSubmitted: (req: DocumentViewRequest) => void
   requestModalOpen: boolean
+  onRequestClick: () => void
   onRequestModalClose: () => void
+  onRequestSubmitted: (req: DocumentViewRequest) => void
   needsRequest: boolean
   children: React.ReactNode
 }
 
-// ── Compact (inline table cell) blur ──────────
-function CompactBlurredGuard({
+// ── Full overlay guard ─────────────────────────
+
+function FullGuard({
   documentId,
   documentType,
   documentTitle,
   existingRequest,
-  onRequestClick,
-  onRequestSubmitted,
   requestModalOpen,
+  onRequestClick,
   onRequestModalClose,
+  onRequestSubmitted,
   needsRequest,
   children,
-}: GuardVariantProps) {
+}: GuardProps) {
+  const status = existingRequest?.status
+
   return (
     <>
-      <span className="relative inline-flex items-center gap-1.5 group">
-        <span
-          style={{ filter: 'blur(3.5px)', pointerEvents: 'none', userSelect: 'none' }}
+      {/* Single unified container */}
+      <div className="restricted-wrapper relative rounded-xl overflow-hidden">
+
+        {/* ONE blurred layer covering everything */}
+        <div
+          aria-hidden="true"
+          className="restricted-blur select-none pointer-events-none"
+          style={{ filter: 'blur(6px)', opacity: 0.45, userSelect: 'none', WebkitUserSelect: 'none' }}
         >
           {children}
-        </span>
-        <Lock size={11} className="text-slate-400 flex-shrink-0" />
+        </div>
 
-        {needsRequest && (!existingRequest || existingRequest.status === 'rejected') && (
-          <button
-            type="button"
-            onClick={onRequestClick}
-            className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition"
+        {/* Single centered overlay */}
+        <div className="restricted-overlay absolute inset-0 flex items-center justify-center bg-slate-900/20 backdrop-blur-[1px]">
+          <div
+            className="restricted-card animate-fade-up"
+            style={{
+              background: 'white',
+              borderRadius: '16px',
+              padding: '28px 32px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+              textAlign: 'center',
+              maxWidth: '320px',
+              width: '90%',
+              border: '1px solid rgba(226, 232, 240, 0.8)',
+            }}
           >
-            Request
-          </button>
-        )}
+            {/* Icon */}
+            <div
+              className="mx-auto mb-4 flex items-center justify-center rounded-2xl"
+              style={{
+                width: '56px',
+                height: '56px',
+                background: status === 'pending'
+                  ? 'linear-gradient(135deg, #fef3c7, #fde68a)'
+                  : status === 'rejected'
+                    ? 'linear-gradient(135deg, #fee2e2, #fecaca)'
+                    : 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+                border: status === 'pending'
+                  ? '1.5px solid #fbbf24'
+                  : status === 'rejected'
+                    ? '1.5px solid #f87171'
+                    : '1.5px solid #93c5fd',
+              }}
+            >
+              {status === 'pending' ? (
+                <Clock size={24} className="text-amber-500" />
+              ) : status === 'rejected' ? (
+                <ShieldOff size={24} className="text-red-500" />
+              ) : (
+                <Lock size={24} className="text-blue-500" />
+              )}
+            </div>
 
-        {existingRequest?.status === 'pending' && (
-          <button
-            type="button"
-            onClick={onRequestClick}
-            className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition"
-          >
-            Pending
-          </button>
-        )}
+            {/* Title */}
+            <h3 className="text-[15px] font-bold text-slate-800 mb-1.5 leading-snug">
+              {status === 'pending'
+                ? 'Access Request Pending'
+                : status === 'rejected'
+                  ? 'Access Request Rejected'
+                  : 'Restricted Document'}
+            </h3>
 
-        {/* Hover tooltip */}
-        <div className="absolute left-0 top-full mt-1.5 z-50 opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-150">
-          <div className="bg-slate-900 text-white text-[11px] font-medium px-3 py-2 rounded-lg shadow-xl whitespace-nowrap max-w-[220px]">
-            {existingRequest?.status === 'pending' ? (
-              '⏳ Request pending P1 review'
-            ) : existingRequest?.status === 'rejected' ? (
-              '❌ Access denied — submit new request'
-            ) : needsRequest ? (
-              'Click Request to ask P1 for access'
-            ) : (
-              '🔒 You don\'t have access to this document'
+            {/* Document name */}
+            {documentTitle && (
+              <p className="text-[11px] font-semibold text-slate-400 mb-3 truncate px-2 bg-slate-50 rounded-lg py-1.5 border border-slate-100">
+                📄 {documentTitle.length > 38 ? documentTitle.slice(0, 37) + '…' : documentTitle}
+              </p>
+            )}
+
+            {/* Subtitle / status message */}
+            <p className="text-[12px] text-slate-500 mb-4 leading-relaxed">
+              {status === 'pending'
+                ? 'Your request is awaiting approval from the Records Officer (P1).'
+                : status === 'rejected'
+                  ? existingRequest?.rejection_reason
+                    ? existingRequest.rejection_reason
+                    : 'Your access request was not approved. You may submit a new request.'
+                  : 'You do not have permission to view this document.'}
+            </p>
+
+            {/* CTA button */}
+            {needsRequest && !status && (
+              <button
+                onClick={onRequestClick}
+                className="w-full flex items-center justify-center gap-2 text-[13px] font-bold py-2.5 px-4 rounded-xl transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: 'linear-gradient(135deg, #2563eb, #3b82f6)',
+                  color: 'white',
+                  boxShadow: '0 2px 8px rgba(37,99,235,0.35)',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <Lock size={14} />
+                Request Access
+              </button>
+            )}
+
+            {status === 'pending' && (
+              <div
+                className="flex items-center justify-center gap-2 text-[12px] font-semibold py-2 px-4 rounded-xl"
+                style={{
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  border: '1px solid #fde68a',
+                }}
+              >
+                <Clock size={13} />
+                Awaiting Review
+              </div>
+            )}
+
+            {status === 'rejected' && needsRequest && (
+              <button
+                onClick={onRequestClick}
+                className="w-full flex items-center justify-center gap-2 text-[13px] font-bold py-2.5 px-4 rounded-xl transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                  color: 'white',
+                  boxShadow: '0 2px 8px rgba(220,38,38,0.3)',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <RotateCcw size={13} />
+                Submit New Request
+              </button>
+            )}
+
+            {!needsRequest && !status && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                Contact P1 Records Officer for access
+              </p>
             )}
           </div>
         </div>
-      </span>
+      </div>
 
       {needsRequest && (
         <RequestViewModal
@@ -305,109 +362,112 @@ function CompactBlurredGuard({
   )
 }
 
-// ── Full card blur with overlay ────────────────
-function FullBlurredGuard({
+// ── Compact inline guard ───────────────────────
+
+function CompactGuard({
   documentId,
   documentType,
   documentTitle,
   existingRequest,
-  onRequestClick,
-  onRequestSubmitted,
   requestModalOpen,
+  onRequestClick,
   onRequestModalClose,
+  onRequestSubmitted,
   needsRequest,
   children,
-}: GuardVariantProps) {
-  const requestStatusConfig = existingRequest ? {
-    pending: {
-      icon: '⏳',
-      label: 'Request Pending',
-      sublabel: 'P1 is reviewing your request',
-      bg: 'bg-amber-50',
-      border: 'border-amber-200',
-    },
-    approved: {
-      icon: '✅',
-      label: 'Access Approved',
-      sublabel: 'Refreshing access…',
-      bg: 'bg-emerald-50',
-      border: 'border-emerald-200',
-    },
-    rejected: {
-      icon: '❌',
-      label: 'Request Rejected',
-      sublabel: existingRequest.rejection_reason ?? 'Contact P1 for details',
-      bg: 'bg-red-50',
-      border: 'border-red-200',
-    },
-  }[existingRequest.status] : null
+}: GuardProps) {
+  const status = existingRequest?.status
 
   return (
     <>
-      <div className="relative rounded-xl overflow-hidden group">
+      <span className="relative inline-flex items-center gap-1.5 group">
         {/* Blurred content */}
-        <div
+        <span
+          style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none' }}
           aria-hidden="true"
-          style={{ filter: 'blur(4px)', pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', opacity: 0.5 }}
         >
           {children}
-        </div>
+        </span>
 
-        {/* Overlay */}
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/20 backdrop-blur-[1px] rounded-xl">
-          <div className="flex flex-col items-center text-center bg-white/96 backdrop-blur-sm px-5 py-4 rounded-2xl shadow-xl border border-slate-200/80 max-w-[260px] gap-2.5">
+        {/* Lock indicator */}
+        <span className="inline-flex items-center gap-1 flex-shrink-0">
+          <Lock size={11} className="text-slate-400" />
+        </span>
 
-            <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
-              <Lock size={18} className="text-slate-500" />
-            </div>
+        {/* Action button */}
+        {needsRequest && !status && (
+          <button
+            type="button"
+            onClick={onRequestClick}
+            className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full transition-all hover:scale-105"
+            style={{
+              background: 'linear-gradient(135deg, #2563eb, #3b82f6)',
+              color: 'white',
+              border: 'none',
+              cursor: 'pointer',
+              boxShadow: '0 1px 4px rgba(37,99,235,0.3)',
+            }}
+          >
+            Request
+          </button>
+        )}
 
-            <div>
-              <p className="text-[13px] font-extrabold text-slate-800">Restricted Document</p>
-              <p className="text-[11px] text-slate-500 leading-snug mt-0.5">
-                {requestStatusConfig
-                  ? requestStatusConfig.sublabel
-                  : 'You don\'t have permission to view this file.'}
-              </p>
-            </div>
+        {status === 'pending' && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+            style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}
+          >
+            <Clock size={10} />
+            Pending
+          </span>
+        )}
 
-            {requestStatusConfig ? (
-              <div className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left ${requestStatusConfig.bg} ${requestStatusConfig.border}`}>
-                <span className="text-base">{requestStatusConfig.icon}</span>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-slate-800">{requestStatusConfig.label}</p>
-                  {existingRequest?.rejection_reason && (
-                    <p className="text-[10px] text-red-600 truncate">{existingRequest.rejection_reason}</p>
-                  )}
-                </div>
-              </div>
-            ) : null}
+        {status === 'rejected' && needsRequest && (
+          <button
+            type="button"
+            onClick={onRequestClick}
+            className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full transition hover:opacity-80"
+            style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', cursor: 'pointer' }}
+          >
+            <RotateCcw size={10} />
+            Retry
+          </button>
+        )}
 
-            {needsRequest && (!existingRequest || existingRequest.status === 'rejected') && (
-              <button
-                onClick={onRequestClick}
-                className="inline-flex items-center gap-1.5 text-[12px] font-bold px-3.5 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition shadow-sm w-full justify-center"
-              >
-                👁 Request View Access
-              </button>
-            )}
-
-            {existingRequest?.status === 'pending' && (
-              <button
-                onClick={onRequestClick}
-                className="text-[11px] font-medium text-slate-500 hover:text-slate-700 hover:underline transition"
-              >
-                View request details →
-              </button>
-            )}
-
-            {!needsRequest && !requestStatusConfig && (
-              <div className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl">
-                <p className="text-[10px] text-slate-500 font-medium">Contact P1 Records Officer</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+        {/* Hover tooltip */}
+        <span className="absolute left-0 top-full mt-2 z-50 opacity-0 group-hover:opacity-100 transition-all duration-150 pointer-events-none">
+          <span
+            className="block text-[11px] font-medium px-3 py-2 rounded-xl shadow-xl whitespace-nowrap"
+            style={{
+              background: '#0f172a',
+              color: 'white',
+              maxWidth: '220px',
+              lineHeight: '1.4',
+            }}
+          >
+            {status === 'pending'
+              ? '⏳ Access request is pending P1 review'
+              : status === 'rejected'
+                ? '❌ Access denied — you can submit a new request'
+                : needsRequest
+                  ? '🔒 Click Request to ask P1 for access'
+                  : '🔒 Restricted — contact P1 for access'}
+            {/* Tooltip arrow */}
+            <span
+              style={{
+                display: 'block',
+                position: 'absolute',
+                top: '-4px',
+                left: '12px',
+                width: '8px',
+                height: '8px',
+                background: '#0f172a',
+                transform: 'rotate(45deg)',
+              }}
+            />
+          </span>
+        </span>
+      </span>
 
       {needsRequest && (
         <RequestViewModal
