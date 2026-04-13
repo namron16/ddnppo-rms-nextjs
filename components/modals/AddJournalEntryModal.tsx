@@ -5,11 +5,15 @@ import { useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
-import { AddJournalEntrySchema, zodErrors } from '@/lib/validations'
+import { AddJournalEntrySchema, zodErrors, type AddJournalEntryInput } from '@/lib/validations'
 
-interface Props { open: boolean; onClose: () => void }
+interface Props {
+  open: boolean
+  onClose: () => void
+  onCreate?: (entry: AddJournalEntryInput) => void
+}
 
-export function AddJournalEntryModal({ open, onClose }: Props) {
+export function AddJournalEntryModal({ open, onClose, onCreate }: Props) {
   const { toast } = useToast()
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState({ title: '', type: 'MEMO', author: '', date: '', content: '' })
@@ -27,6 +31,7 @@ export function AddJournalEntryModal({ open, onClose }: Props) {
     }
     setErrors({})
     toast.success(`Journal entry "${result.data.title}" created.`)
+    onCreate?.(result.data)
     onClose()
     setForm({ title: '', type: 'MEMO', author: '', date: '', content: '' })
   }
