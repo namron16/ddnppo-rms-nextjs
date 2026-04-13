@@ -1,5 +1,5 @@
 'use client'
-// lib/auth.tsx  — Admin-Only RBAC Authentication with Presence Tracking
+// lib/auth.tsx  — Admin-Only RBAC Authentication with Presence + Audit Logging
 // 13 hardcoded admin accounts, no public registration
 
 import React, {
@@ -7,6 +7,7 @@ import React, {
   useCallback, useEffect,
 } from 'react'
 import { setAdminActive, setAdminInactive } from './accessRequests'
+import { logLogin, logLogout, setCurrentLogger } from './adminLogger'
 
 // ── Role Definitions ──────────────────────────
 export type AdminRole =
@@ -118,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const found = ADMIN_ACCOUNTS.find(a => a.id === roleId)
       if (found) {
         setUser(found)
-        // Mark as active on page load/refresh
+        setCurrentLogger(found.id)
         setAdminActive(found.id).catch(() => {})
       } else {
         deleteCookie('rms_session')
@@ -128,11 +129,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false)
   }, [])
 
-  // Mark inactive when tab/window closes
+  // Mark inactive + log logout when tab/window closes
   useEffect(() => {
     if (!user) return
     const handleUnload = () => {
       setAdminInactive(user.id).catch(() => {})
+      logLogout(user.id).catch(() => {})
     }
     window.addEventListener('beforeunload', handleUnload)
     return () => window.removeEventListener('beforeunload', handleUnload)
@@ -146,15 +148,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(account)
     setCookie('rms_session', account.id)
     setCookie('rms_role', account.role)
-    // Mark as active
+    setCurrentLogger(account.id)
     setAdminActive(account.id).catch(() => {})
+    logLogin(account.id)
     return true
   }, [])
 
   const logout = useCallback(() => {
     if (user) {
+      logLogout(user.id)
       setAdminInactive(user.id).catch(() => {})
     }
+    setCurrentLogger(null)
     deleteCookie('rms_session')
     deleteCookie('rms_role')
     setTimeout(() => setUser(null), 50)
