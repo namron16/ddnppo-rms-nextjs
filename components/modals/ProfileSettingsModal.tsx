@@ -197,13 +197,14 @@ export function ProfileSettingsModal({
       <div
         ref={modalRef}
         onClick={e => e.stopPropagation()}
-        className={`fixed z-[1060] transition-all duration-200 ${
+        className={`fixed top-0 left-0 z-[1060] transition-all duration-200 ${
           closing
             ? 'opacity-0 translate-y-2 scale-[0.98]'
             : 'opacity-100 translate-y-0 scale-100'
         }`}
         style={{
           left: '252px',
+          top: '16px',
           bottom: '16px',
           width: '360px',
           maxHeight: 'calc(100vh - 32px)',
