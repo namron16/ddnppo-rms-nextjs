@@ -3,7 +3,7 @@
 // Clean single-overlay restricted document view
 
 import { useEffect, useState, useCallback } from 'react'
-import { Lock, ShieldOff, Clock, RotateCcw } from 'lucide-react'
+import { Lock, Clock, RotateCcw } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useToast } from '@/components/ui/Toast'
 import { RequestViewModal } from '@/components/modals/RequestViewModal'
@@ -137,7 +137,30 @@ export function EnhancedDocumentGuard({
 
   if (compact) {
     return (
-      <CompactGuard
+      <>
+        <CompactGuard
+          documentId={documentId}
+          documentType={documentType}
+          documentTitle={documentTitle}
+          existingRequest={existingRequest}
+          requestModalOpen={requestModalOpen}
+          onRequestClick={() => setRequestModalOpen(true)}
+          onRequestModalClose={() => setRequestModalOpen(false)}
+          onRequestSubmitted={(req) => {
+            setExistingRequest(req)
+            setRequestModalOpen(false)
+          }}
+          needsRequest={needsRequest}
+        >
+          {children}
+        </CompactGuard>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <FullGuard
         documentId={documentId}
         documentType={documentType}
         documentTitle={documentTitle}
@@ -152,27 +175,8 @@ export function EnhancedDocumentGuard({
         needsRequest={needsRequest}
       >
         {children}
-      </CompactGuard>
-    )
-  }
-
-  return (
-    <FullGuard
-      documentId={documentId}
-      documentType={documentType}
-      documentTitle={documentTitle}
-      existingRequest={existingRequest}
-      requestModalOpen={requestModalOpen}
-      onRequestClick={() => setRequestModalOpen(true)}
-      onRequestModalClose={() => setRequestModalOpen(false)}
-      onRequestSubmitted={(req) => {
-        setExistingRequest(req)
-        setRequestModalOpen(false)
-      }}
-      needsRequest={needsRequest}
-    >
-      {children}
-    </FullGuard>
+      </FullGuard>
+    </>
   )
 }
 
@@ -192,7 +196,9 @@ interface GuardProps {
 }
 
 // ── Full overlay guard ─────────────────────────
-// Single parent container: blur the whole area, one centered overlay.
+// Structure:
+//   1. Document header (ALWAYS VISIBLE — no blur)
+//   2. Preview area with blur + single centered overlay
 
 function FullGuard({
   documentId,
@@ -208,39 +214,73 @@ function FullGuard({
 }: GuardProps) {
   const status = existingRequest?.status
 
+  const overlayBg =
+    status === 'pending'
+      ? { bg: '#fef3c7', border: '#fbbf24', icon: <Clock size={24} className="text-amber-500" />, label: 'linear-gradient(135deg, #fef3c7, #fde68a)' }
+      : status === 'rejected'
+      ? { bg: '#fee2e2', border: '#f87171', icon: <Lock size={24} className="text-red-500" />, label: 'linear-gradient(135deg, #fee2e2, #fecaca)' }
+      : { bg: '#eff6ff', border: '#93c5fd', icon: <Lock size={24} className="text-blue-500" />, label: 'linear-gradient(135deg, #eff6ff, #dbeafe)' }
+
+  const title =
+    status === 'pending' ? 'Access Request Pending'
+    : status === 'rejected' ? 'Access Request Rejected'
+    : 'Restricted Document'
+
+  const message =
+    status === 'pending'
+      ? 'Your request is awaiting approval from the Records Officer (P1).'
+      : status === 'rejected'
+      ? existingRequest?.rejection_reason || 'Your access request was not approved. You may submit a new request.'
+      : 'You do not have permission to view this document.'
+
   return (
     <>
-      {/*
-        ┌─────────────────────────────────────────────────────┐
-        │  Single relative container                          │
-        │  ┌───────────────────────────────────────────────┐  │
-        │  │  Blurred children (the entire document area)  │  │
-        │  └───────────────────────────────────────────────┘  │
-        │  ┌───────────────────────────────────────────────┐  │
-        │  │  Absolute overlay — one centered card         │  │
-        │  └───────────────────────────────────────────────┘  │
-        └─────────────────────────────────────────────────────┘
-      */}
-      <div className="relative rounded-xl overflow-hidden">
+      {/* ─── Step 1: ALWAYS-VISIBLE document header ─── */}
+      <div className="mb-3 px-1">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-400">
+            <Lock size={15} />
+          </span>
+          <p className="text-sm font-semibold text-slate-700 truncate">
+            {documentTitle}
+          </p>
+          <span className="ml-auto flex-shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
+            Restricted
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-0.5 ml-6 capitalize">
+          {documentType.replace(/_/g, ' ')}
+        </p>
+      </div>
 
-        {/* ── ONE blurred layer covering the ENTIRE children area ── */}
+      {/* ─── Step 2: Preview area with single blur + single overlay ─── */}
+      <div
+        className="relative rounded-xl overflow-hidden"
+        style={{ minHeight: '260px' }}
+      >
+        {/* Single blurred content layer */}
         <div
           aria-hidden="true"
           style={{
-            filter: 'blur(6px)',
+            filter: 'blur(7px)',
             pointerEvents: 'none',
             userSelect: 'none',
             WebkitUserSelect: 'none',
-            opacity: 0.45,
+            opacity: 0.4,
+            minHeight: '260px',
           }}
         >
           {children}
         </div>
 
-        {/* ── ONE centered overlay ── */}
+        {/* Single full-cover overlay */}
         <div
           className="absolute inset-0 flex items-center justify-center"
-          style={{ pointerEvents: 'auto' }}
+          style={{
+            background: 'rgba(255,255,255,0.55)',
+            backdropFilter: 'blur(1px)',
+            zIndex: 10,
+          }}
         >
           <div
             className="animate-fade-up flex flex-col items-center text-center"
@@ -248,10 +288,10 @@ function FullGuard({
               background: 'white',
               borderRadius: '16px',
               padding: '28px 32px',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-              maxWidth: '320px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)',
+              maxWidth: '340px',
               width: '90%',
-              border: '1px solid rgba(226, 232, 240, 0.8)',
+              border: '1px solid rgba(226,232,240,0.9)',
             }}
           >
             {/* Icon */}
@@ -260,65 +300,21 @@ function FullGuard({
               style={{
                 width: '56px',
                 height: '56px',
-                background:
-                  status === 'pending'
-                    ? 'linear-gradient(135deg, #fef3c7, #fde68a)'
-                    : status === 'rejected'
-                    ? 'linear-gradient(135deg, #fee2e2, #fecaca)'
-                    : 'linear-gradient(135deg, #eff6ff, #dbeafe)',
-                border:
-                  status === 'pending'
-                    ? '1.5px solid #fbbf24'
-                    : status === 'rejected'
-                    ? '1.5px solid #f87171'
-                    : '1.5px solid #93c5fd',
+                background: overlayBg.label,
+                border: `1.5px solid ${overlayBg.border}`,
               }}
             >
-              {status === 'pending' ? (
-                <Clock size={24} className="text-amber-500" />
-              ) : status === 'rejected' ? (
-                <ShieldOff size={24} className="text-red-500" />
-              ) : (
-                <Lock size={24} className="text-blue-500" />
-              )}
+              {overlayBg.icon}
             </div>
 
             {/* Title */}
-            <h3
-              className="text-[15px] font-bold text-slate-800 mb-1.5 leading-snug"
-            >
-              {status === 'pending'
-                ? 'Access Request Pending'
-                : status === 'rejected'
-                ? 'Access Request Rejected'
-                : 'Restricted Document'}
+            <h3 className="text-[15px] font-bold text-slate-800 mb-1.5 leading-snug">
+              {title}
             </h3>
 
-            {/* Document name pill */}
-            {documentTitle && (
-              <p
-                className="text-[11px] font-semibold text-slate-400 mb-3 truncate px-2 py-1.5 rounded-lg border"
-                style={{
-                  background: '#f8fafc',
-                  borderColor: '#e2e8f0',
-                  maxWidth: '100%',
-                }}
-              >
-                📄 {documentTitle.length > 38
-                  ? documentTitle.slice(0, 37) + '…'
-                  : documentTitle}
-              </p>
-            )}
-
-            {/* Status message */}
+            {/* Message */}
             <p className="text-[12px] text-slate-500 mb-4 leading-relaxed">
-              {status === 'pending'
-                ? 'Your request is awaiting approval from the Records Officer (P1).'
-                : status === 'rejected'
-                ? existingRequest?.rejection_reason
-                  ? existingRequest.rejection_reason
-                  : 'Your access request was not approved. You may submit a new request.'
-                : 'You do not have permission to view this document.'}
+              {message}
             </p>
 
             {/* CTA */}
