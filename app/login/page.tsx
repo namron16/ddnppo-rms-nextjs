@@ -57,7 +57,7 @@ export default function LoginPage() {
             Records Management<br />System
           </h1>
           <p className="text-white/60 text-[15px] leading-relaxed mb-12 max-w-sm">
-            Secure, centralized document management for DDNPPO authorized administrators only.
+            Secure, centralized document management for DNPPO authorized administrators only.
           </p>
 
           {/* Role hierarchy display */}
