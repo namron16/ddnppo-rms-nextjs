@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Modal } from '@/components/ui/Modal'
 import { ToolbarSelect } from '@/components/ui/Toolbar'
 import { useToast } from '@/components/ui/Toast'
@@ -13,7 +14,7 @@ import { AddJournalEntryModal } from '@/components/modals/AddJournalEntryModal'
 import { useDisclosure, useModal, useSearch } from '@/hooks'
 import type { AddJournalEntryInput } from '@/lib/validations'
 import type { JournalEntry } from '@/types'
-import { addDailyJournal, getDailyJournals, type DailyJournalRecord } from '@/lib/data'
+import { addArchivedDoc, addDailyJournal, archiveDailyJournal, getDailyJournals, updateDailyJournal, type DailyJournalRecord } from '@/lib/data'
 
 type JournalStatus = 'Draft' | 'Filed' | 'Reviewed'
 
@@ -110,7 +111,9 @@ function ViewJournalModal({
 export default function DailyJournalsPage() {
   const { toast } = useToast()
   const addModal = useModal()
+  const editDisc = useDisclosure<JournalRecord>()
   const viewDisc = useDisclosure<JournalRecord>()
+  const archiveDisc = useDisclosure<JournalRecord>()
   const [loading, setLoading] = useState(true)
   const [entries, setEntries] = useState<JournalRecord[]>([])
   const [activeType, setActiveType] = useState<'ALL' | JournalEntry['type']>('ALL')
@@ -175,8 +178,55 @@ export default function DailyJournalsPage() {
     setEntries(prev => [nextEntry, ...prev])
     addModal.close()
     viewDisc.close()
-    toast.success('Daily journal entry saved to database.')
   }
+
+    async function handleEdit(input: AddJournalEntryInput) {
+      const existing = editDisc.payload
+      if (!existing) return
+
+      const updatedEntry: JournalRecord = {
+        ...existing,
+        title: input.title.trim(),
+        type: input.type,
+        author: input.author.trim(),
+        date: input.date,
+        content: input.content?.trim() || 'No content was provided for this entry.',
+        summary: input.content?.trim()
+          ? input.content.trim().slice(0, 120)
+          : 'Updated journal entry.',
+        status: input.type === 'MEMO' ? 'Draft' : input.type === 'REPORT' ? 'Reviewed' : 'Filed',
+      }
+
+      await updateDailyJournal(updatedEntry)
+      setEntries(prev => prev.map(entry => entry.id === updatedEntry.id ? updatedEntry : entry))
+      if (viewDisc.payload?.id === updatedEntry.id) {
+        viewDisc.open(updatedEntry)
+      }
+      editDisc.close()
+    }
+
+    async function handleArchive() {
+      const item = archiveDisc.payload
+      if (!item) return
+
+      const today = new Date().toISOString().split('T')[0]
+
+      await archiveDailyJournal(item.id)
+      await addArchivedDoc({
+        id: `arc-dj-${item.id}`,
+        title: item.title,
+        type: 'Daily Journal',
+        archivedDate: today,
+        archivedBy: 'Admin',
+      })
+
+      setEntries(prev => prev.filter(entry => entry.id !== item.id))
+      if (viewDisc.payload?.id === item.id) {
+        viewDisc.close()
+      }
+      archiveDisc.close()
+      toast.success(`"${item.title}" has been archived.`)
+    }
 
   return (
     <>
@@ -288,6 +338,8 @@ export default function DailyJournalsPage() {
                       <td className="px-4 py-3.5 align-top">
                         <div className="flex flex-wrap gap-2">
                           <Button variant="outline" size="sm" onClick={() => viewDisc.open(entry)}>View</Button>
+                          <Button variant="outline" size="sm" onClick={() => editDisc.open(entry)}>Edit</Button>
+                          <Button variant="danger" size="sm" onClick={() => archiveDisc.open(entry)}>Archive</Button>
                           <Button variant="ghost" size="sm" onClick={() => navigator.clipboard?.writeText(entry.title)}>Copy title</Button>
                         </div>
                       </td>
@@ -300,8 +352,31 @@ export default function DailyJournalsPage() {
         </div>
       </div>
 
-      <AddJournalEntryModal open={addModal.isOpen} onClose={addModal.close} onCreate={handleCreate} />
+      <AddJournalEntryModal
+        open={addModal.isOpen}
+        onClose={addModal.close}
+        title="New Journal Entry"
+        submitLabel="✅ Create Entry"
+        onSubmit={handleCreate}
+      />
+      <AddJournalEntryModal
+        open={editDisc.isOpen}
+        onClose={editDisc.close}
+        title="Edit Journal Entry"
+        submitLabel="💾 Save Changes"
+        initialValue={editDisc.payload ?? undefined}
+        onSubmit={handleEdit}
+      />
       <ViewJournalModal entry={viewDisc.payload ?? null} open={viewDisc.isOpen} onClose={viewDisc.close} />
+      <ConfirmDialog
+        open={archiveDisc.isOpen}
+        title="Archive Journal Entry"
+        message={`Move "${archiveDisc.payload?.title}" to the Archive? This will transfer it to archived documents.`}
+        confirmLabel="Archive"
+        variant="danger"
+        onConfirm={handleArchive}
+        onCancel={archiveDisc.close}
+      />
     </>
   )
 }
