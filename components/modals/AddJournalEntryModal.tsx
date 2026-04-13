@@ -16,6 +16,7 @@ interface Props {
   onSubmit?: (entry: AddJournalEntryInput) => void | Promise<void>
 }
 
+const getTodayDate = () => new Date().toISOString().split('T')[0]
 const EMPTY_FORM = { title: '', type: 'MEMO' as const, author: '', date: '', content: '' }
 
 export function AddJournalEntryModal({
@@ -37,7 +38,7 @@ export function AddJournalEntryModal({
       title: initialValue?.title ?? '',
       type: initialValue?.type ?? 'MEMO',
       author: initialValue?.author ?? '',
-      date: initialValue?.date ?? '',
+      date: initialValue?.date ?? getTodayDate(),
       content: initialValue?.content ?? '',
     })
   }, [initialValue, open])

@@ -95,6 +95,19 @@ export async function addSpecialOrder(so: SpecialOrder & { fileUrl?: string }): 
   if (error) console.warn('Supabase unavailable (add special_order):', error.message)
 }
 
+export async function updateSpecialOrder(so: SpecialOrder & { fileUrl?: string }): Promise<void> {
+  const { error } = await supabase
+    .from('special_orders')
+    .update({
+      reference: so.reference,
+      subject: so.subject,
+      date: so.date,
+      status: so.status,
+    })
+    .eq('id', so.id)
+  if (error) console.warn('Supabase unavailable (update special_order):', error.message)
+}
+
 export async function updateSpecialOrderAttachment(id: string, fileUrl: string, attachments = 1): Promise<void> {
   const { error } = await supabase
     .from('special_orders')
@@ -428,6 +441,21 @@ export async function addLibraryItem(
     description: item.description ?? null,
   })
   if (error) console.warn('Supabase unavailable (add library_item):', error.message)
+}
+
+export async function updateLibraryItem(
+  item: LibraryItem & { fileUrl?: string; description?: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from('library_items')
+    .update({
+      title: item.title,
+      category: item.category,
+      date_added: item.dateAdded,
+      description: item.description ?? null,
+    })
+    .eq('id', item.id)
+  if (error) console.warn('Supabase unavailable (update library_item):', error.message)
 }
 
 export async function deleteLibraryItem(id: string): Promise<void> {
