@@ -33,6 +33,7 @@ import {
   createApproval, reviewByDPDAorDPDO, finalApproveByPD,
   type DocumentApproval, type DocType,
 } from '@/lib/rbac'
+import { logViewDocument } from '@/lib/adminLogger'
 import {
   canUploadDocuments, canReviewDocuments, canFinalApprove,
   hasFullDocumentAccess, ROLE_META,
@@ -774,7 +775,12 @@ export default function MasterPage() {
                           ⬇ Download
                         </a>
                         <button
-                          onClick={() => setViewerFile({ url: selection.fileUrl!, name: selection.title })}
+                          onClick={() => {
+                            setViewerFile({ url: selection.fileUrl!, name: selection.title })
+                            if (user?.role) {
+                              logViewDocument(selection.title, user.role as AdminRole).catch(() => {})
+                            }
+                          }}
                           className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
                         >
                           👁 View
@@ -859,7 +865,12 @@ export default function MasterPage() {
                                 <p className="text-[11px] text-slate-400">{att.file_size} · {new Date(att.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
                               </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => setViewerFile({ url: att.file_url, name: att.file_name })}
+                                <button onClick={() => {
+                                  setViewerFile({ url: att.file_url, name: att.file_name })
+                                  if (user?.role) {
+                                    logViewDocument(att.file_name, user.role as AdminRole).catch(() => {})
+                                  }
+                                }}
                                   className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
                                   👁
                                 </button>

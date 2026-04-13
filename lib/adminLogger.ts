@@ -84,8 +84,11 @@ export const logLogin = (adminId: AdminRole) =>
 export const logLogout = (adminId: AdminRole) =>
   logAction('logout', `${adminId} logged out`, adminId)
 
-export const logViewDocument = (docTitle: string) =>
-  logAction('view_document', `Viewed document "${docTitle}"`)
+export const logViewDocument = (docTitle: string, adminIdOverride?: AdminRole) => {
+  const actor = adminIdOverride ?? _currentAdminId
+  if (!actor) return Promise.resolve()
+  return logAction('view_document', `${actor} viewed document "${docTitle}"`, adminIdOverride)
+}
 
 export const logDownloadDocument = (docTitle: string) =>
   logAction('download_document', `Downloaded document "${docTitle}"`)

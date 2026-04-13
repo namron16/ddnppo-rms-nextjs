@@ -84,6 +84,11 @@ function getInitials(adminId: string) {
   return account?.initials ?? adminId.slice(0, 2).toUpperCase()
 }
 
+function getAccountName(adminId: string) {
+  const account = ADMIN_ACCOUNTS.find(a => a.id === adminId)
+  return account?.name ?? 'Unknown Account'
+}
+
 // ── Stats Cards ────────────────────────────────
 function StatsBar({ logs }: { logs: AdminLog[] }) {
   const stats = useMemo(() => {
@@ -165,7 +170,8 @@ export default function LogHistoryPage() {
   const filtered = useMemo(() => {
     return logs.filter(log => {
       const q = query.trim().toLowerCase()
-      const matchQ = !q || log.description.toLowerCase().includes(q) || log.admin_id.toLowerCase().includes(q) || log.action.toLowerCase().includes(q)
+      const accountName = getAccountName(log.admin_id).toLowerCase()
+      const matchQ = !q || log.description.toLowerCase().includes(q) || log.admin_id.toLowerCase().includes(q) || log.action.toLowerCase().includes(q) || accountName.includes(q)
       const matchAdmin = adminFilter === 'ALL' || log.admin_id === adminFilter
       const matchAction = actionFilter === 'ALL' || log.action === actionFilter
       const matchDate = !dateFilter || log.created_at.startsWith(dateFilter)
@@ -175,9 +181,10 @@ export default function LogHistoryPage() {
 
   // ── CSV Export ─────────────────────────────
   function exportCSV() {
-    const header = ['Admin', 'Action', 'Description', 'Date & Time']
+    const header = ['Admin Role', 'Account Name', 'Action', 'Description', 'Date & Time']
     const rows = filtered.map(l => [
       l.admin_id,
+      `"${getAccountName(l.admin_id).replace(/"/g, '""')}"`,
       getActionConfig(l.action).label,
       `"${l.description.replace(/"/g, '""')}"`,
       formatDateTime(l.created_at),
@@ -303,7 +310,10 @@ export default function LogHistoryPage() {
                             >
                               {initials}
                             </div>
-                            <span className="text-sm font-semibold text-slate-800">{log.admin_id}</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 leading-tight">{log.admin_id}</p>
+                              <p className="text-[11px] text-slate-500 truncate">{getAccountName(log.admin_id)}</p>
+                            </div>
                           </div>
                         </td>
 

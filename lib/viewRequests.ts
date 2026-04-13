@@ -5,6 +5,7 @@
 import { supabase } from './supabase'
 import type { AdminRole } from './auth'
 import type { DocType } from './rbac'
+import { logApproveRequest, logRejectRequest, logRequestAccess } from './adminLogger'
 
 // ── Types ─────────────────────────────────────
 
@@ -91,6 +92,8 @@ export async function submitViewRequest(
     console.error('submitViewRequest error:', error.message)
     return null
   }
+
+  logRequestAccess(requesterId, documentTitle || documentId).catch(() => {})
 
   return data as DocumentViewRequest
 }
@@ -226,6 +229,8 @@ export async function approveViewRequest(
     console.warn('approveViewRequest visibility grant warn:', visError.message)
   }
 
+  logApproveRequest(request.requester_id, request.document_title || request.document_id).catch(() => {})
+
   return true
 }
 
@@ -249,6 +254,20 @@ export async function rejectViewRequest(
   if (error) {
     console.error('rejectViewRequest error:', error.message)
     return false
+  }
+
+  const { data: rejected } = await supabase
+    .from('document_view_requests')
+    .select('requester_id, document_title, document_id')
+    .eq('id', requestId)
+    .maybeSingle()
+
+  if (rejected) {
+    logRejectRequest(
+      (rejected as any).requester_id,
+      (rejected as any).document_title || (rejected as any).document_id,
+      rejectionReason
+    ).catch(() => {})
   }
 
   return true
