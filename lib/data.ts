@@ -331,14 +331,53 @@ export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUr
 
 export async function addConfidentialDoc(
   doc: ConfidentialDoc & { fileUrl?: string; passwordHash?: string }
-): Promise<void> {
+): Promise<boolean> {
   const { error } = await supabase.from('confidential_docs').insert({
     id: doc.id, title: doc.title, classification: doc.classification,
     date: doc.date, access: doc.access,
     file_url:      doc.fileUrl      ?? null,
     password_hash: doc.passwordHash ?? null,
   })
-  if (error) console.warn('Supabase unavailable (add confidential_doc):', error.message)
+  if (error) {
+    console.warn('Supabase unavailable (add confidential_doc):', error.message)
+    return false
+  }
+
+  return true
+}
+
+export async function updateConfidentialDoc(
+  id: string,
+  updates: {
+    title: string
+    classification: ConfidentialDoc['classification']
+    date: string
+    access: string
+    fileUrl?: string | null
+    passwordHash?: string | null
+  }
+): Promise<boolean> {
+  const payload: Record<string, unknown> = {
+    title: updates.title,
+    classification: updates.classification,
+    date: updates.date,
+    access: updates.access,
+  }
+
+  if (updates.fileUrl !== undefined) payload.file_url = updates.fileUrl
+  if (updates.passwordHash !== undefined) payload.password_hash = updates.passwordHash
+
+  const { error } = await supabase
+    .from('confidential_docs')
+    .update(payload)
+    .eq('id', id)
+
+  if (error) {
+    console.warn('Supabase unavailable (update confidential_doc):', error.message)
+    return false
+  }
+
+  return true
 }
 
 export async function deleteConfidentialDoc(id: string): Promise<void> {
@@ -347,10 +386,15 @@ export async function deleteConfidentialDoc(id: string): Promise<void> {
 }
 
 // Sets archived to true — record is kept, not deleted
-export async function archiveConfidentialDoc(id: string): Promise<void> {
+export async function archiveConfidentialDoc(id: string): Promise<boolean> {
   const { error } = await supabase
     .from('confidential_docs').update({ archived: true }).eq('id', id)
-  if (error) console.warn('Supabase unavailable (archive confidential_doc):', error.message)
+  if (error) {
+    console.warn('Supabase unavailable (archive confidential_doc):', error.message)
+    return false
+  }
+
+  return true
 }
 
 /* ════════════════════════════════════════════
@@ -434,12 +478,17 @@ export async function getArchivedDocs() {
 
 export async function addArchivedDoc(item: {
   id: string; title: string; type: string; archivedDate: string; archivedBy: string
-}): Promise<void> {
+}): Promise<boolean> {
   const { error } = await supabase.from('archived_docs').insert({
     id: item.id, title: item.title, type: item.type,
     archived_date: item.archivedDate, archived_by: item.archivedBy,
   })
-  if (error) console.warn('Supabase unavailable (add archived_doc):', error.message)
+  if (error) {
+    console.warn('Supabase unavailable (add archived_doc):', error.message)
+    return false
+  }
+
+  return true
 }
 
 export async function deleteArchivedDoc(id: string): Promise<void> {
