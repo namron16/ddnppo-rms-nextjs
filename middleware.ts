@@ -3,6 +3,8 @@
 
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { getDefaultAdminRoute, isAllowedAdminPath } from './lib/adminRouteAccess'
+import type { SessionRole } from './lib/adminRouteAccess'
 
 const PROTECTED = ['/admin']
 const PUBLIC    = ['/login']
@@ -34,7 +36,7 @@ export function middleware(request: NextRequest) {
   // Redirect authenticated users away from login
   if (PUBLIC.some(p => pathname.startsWith(p))) {
     if (isLoggedIn) {
-      return NextResponse.redirect(new URL('/admin/master', request.url))
+      return NextResponse.redirect(new URL(getDefaultAdminRoute(sessionRole as SessionRole), request.url))
     }
     // Allow unauthenticated access to /login
     // Also clear any stale session cookies if present
@@ -52,10 +54,22 @@ export function middleware(request: NextRequest) {
     return redirectToLogin()
   }
 
+  // Redirect authenticated users away from unauthorized admin paths.
+  if (PROTECTED.some(p => pathname.startsWith(p)) && isLoggedIn) {
+    const role = sessionRole as SessionRole
+    if (pathname === '/admin') {
+      return NextResponse.redirect(new URL(getDefaultAdminRoute(role), request.url))
+    }
+
+    if (!isAllowedAdminPath(pathname, role)) {
+      return NextResponse.redirect(new URL(getDefaultAdminRoute(role), request.url))
+    }
+  }
+
   // Redirect root to login or admin
   if (pathname === '/') {
     if (isLoggedIn) {
-      return NextResponse.redirect(new URL('/admin/master', request.url))
+      return NextResponse.redirect(new URL(getDefaultAdminRoute(sessionRole as SessionRole), request.url))
     }
     return redirectToLogin()
   }

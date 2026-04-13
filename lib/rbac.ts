@@ -164,7 +164,35 @@ export async function canAdminViewDocument(
   documentId: string,
   documentType: DocType
 ): Promise<boolean> {
-  // PD, DPDA, DPDO, P1 always have full access
+  if (documentType === 'classified_document') {
+    if (adminId === 'P2') return true
+
+    const { data, error } = await supabase
+      .from('document_visibility')
+      .select('can_view, granted_at, granted_by')
+      .eq('document_id', documentId)
+      .eq('document_type', documentType)
+      .eq('admin_id', adminId)
+      .maybeSingle()
+
+    if (error || !data || data.can_view !== true) return false
+
+    const isTemporaryGrant = !!(data as any).granted_at && !!(data as any).granted_by
+    if (!isTemporaryGrant) return true
+    if (isWithin24Hours((data as any).granted_at)) return true
+
+    await supabase
+      .from('document_visibility')
+      .update({ can_view: false })
+      .eq('document_id', documentId)
+      .eq('document_type', documentType)
+      .eq('admin_id', adminId)
+      .eq('can_view', true)
+
+    return false
+  }
+
+  // PD, DPDA, DPDO, P1 always have full access to non-classified documents
   if (FULL_ACCESS_ROLES.includes(adminId)) return true
 
   // PRIMARY CHECK: tagged_admin_access on the master_documents record
@@ -211,6 +239,33 @@ export async function getBatchVisibility(
   documentIds: string[],
   documentType: DocType
 ): Promise<Set<string>> {
+  if (documentType === 'classified_document') {
+    if (adminId === 'P2') return new Set(documentIds)
+
+    if (documentIds.length === 0) return new Set()
+
+    const { data, error } = await supabase
+      .from('document_visibility')
+      .select('document_id, can_view, granted_at, granted_by')
+      .in('document_id', documentIds)
+      .eq('document_type', documentType)
+      .eq('admin_id', adminId)
+      .eq('can_view', true)
+
+    if (error) return new Set()
+
+    const allowed = new Set<string>()
+    for (const row of (data ?? []) as any[]) {
+      if (row.can_view !== true) continue
+      const isTemporaryGrant = !!row.granted_at && !!row.granted_by
+      if (!isTemporaryGrant || isWithin24Hours(row.granted_at)) {
+        allowed.add(row.document_id as string)
+      }
+    }
+
+    return allowed
+  }
+
   if (FULL_ACCESS_ROLES.includes(adminId)) {
     return new Set(documentIds)
   }
@@ -298,6 +353,19 @@ export async function getDocumentTaggedRoles(
   documentId: string,
   documentType: DocType
 ): Promise<AdminRole[]> {
+  if (documentType === 'classified_document') {
+    const { data, error } = await supabase
+      .from('document_visibility')
+      .select('admin_id')
+      .eq('document_id', documentId)
+      .eq('document_type', documentType)
+      .eq('can_view', true)
+
+    if (error) return []
+    const roles = (data ?? []).map((r: any) => r.admin_id as AdminRole)
+    return Array.from(new Set(roles))
+  }
+
   if (documentType === 'master') {
     const { data, error } = await supabase
       .from('master_documents')
@@ -320,6 +388,38 @@ export async function getDocumentTaggedRoles(
 
   if (error) return []
   return (data ?? []).map((r: any) => r.admin_id as AdminRole)
+}
+
+export async function setClassifiedDocumentVisibility(
+  documentId: string,
+  documentTitle = ''
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('document_visibility')
+    .upsert({
+      document_id: documentId,
+      document_type: 'classified_document',
+      admin_id: 'P2',
+      can_view: true,
+    }, { onConflict: 'document_id,document_type,admin_id' })
+
+  if (error) {
+    console.error('setClassifiedDocumentVisibility error:', error.message)
+    return false
+  }
+
+  await supabase.from('visibility_audit_log').insert({
+    document_id: documentId,
+    document_type: 'classified_document',
+    document_title: documentTitle,
+    tagged_by: 'P2',
+    tagged_roles: ['P2'],
+    action: 'set',
+  }).then(({ error: auditError }) => {
+    if (auditError) console.warn('visibility_audit_log warn:', auditError.message)
+  })
+
+  return true
 }
 
 export async function getDocumentVisibility(
