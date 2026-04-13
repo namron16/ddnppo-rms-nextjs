@@ -1,5 +1,5 @@
 'use client'
-// components/layout/Sidebar.tsx — Updated with ViewRequestBell for P1
+// components/layout/Sidebar.tsx — Updated with clickable profile + ProfileSettingsModal
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -7,6 +7,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import LogoutConfirmModal from '@/components/modals/LogoutConfirmModal'
+import { ProfileSettingsModal } from '@/components/modals/ProfileSettingsModal'
 
 interface NavItem {
   label: string
@@ -18,14 +19,14 @@ const DOC_NAV: NavItem[] = [
   { label: 'Master Documents',      icon: '📁', href: '/admin/master' },
   { label: 'Admin Orders',          icon: '📋', href: '/admin/admin-orders' },
   { label: '201 Files',             icon: '📔', href: '/admin/personnel' },
-  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journals' },  // renamed from classified-docs
+  { label: 'Daily Journal',         icon: '📒', href: '/admin/daily-journals' },
   { label: 'Organization',          icon: '🏛️', href: '/admin/organization' },
   { label: 'e-Library',             icon: '📚', href: '/admin/e-library' },
 ]
 const P2_NAV: NavItem[] = [
   { label: 'Master Documents',      icon: '📁', href: '/admin/master' },
   { label: 'Admin Orders',          icon: '📋', href: '/admin/admin-orders' },
-  { label: 'Classified Documents',  icon: '🛡️', href: '/admin/classified-documents' },  // renamed from classified-docs
+  { label: 'Classified Documents',  icon: '🛡️', href: '/admin/classified-documents' },
   { label: 'Organization',          icon: '🏛️', href: '/admin/organization' },
   { label: 'e-Library',             icon: '📚', href: '/admin/e-library' },
 ]
@@ -60,11 +61,22 @@ function NavLink({ item, active, onNavigate }: {
 
 export function Sidebar() {
   const { user, logout } = useAuth()
-  const router = useRouter()
+  const router   = useRouter()
   const pathname = usePathname()
 
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [showLogoutConfirm,  setShowLogoutConfirm]  = useState(false)
+  const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [pendingHref, setPendingHref] = useState<string | null>(null)
+
+  // Local overrides — updated after profile save
+  const [localDisplayName, setLocalDisplayName] = useState<string | null>(null)
+  const [localAvatarUrl,   setLocalAvatarUrl]   = useState<string | null>(null)
+
+  // Reset local overrides when user changes (e.g. logout/login)
+  useEffect(() => {
+    setLocalDisplayName(null)
+    setLocalAvatarUrl(null)
+  }, [user?.id])
 
   useEffect(() => {
     const allRoutes = [...DOC_NAV, ...ADMIN_NAV].map(item => item.href)
@@ -79,15 +91,30 @@ export function Sidebar() {
     setTimeout(() => { router.push('/login') }, 100)
   }
 
-  // Show management nav only for PD and P1
+  function handleProfileUpdated({ displayName, avatarUrl }: { displayName?: string; avatarUrl?: string }) {
+    if (displayName) setLocalDisplayName(displayName)
+    if (avatarUrl)   setLocalAvatarUrl(avatarUrl)
+  }
+
   const canSeeAdmin = user && ['PD', 'P1'].includes(user.role)
-  const canSeeP2 = user?.role === 'P2';
-  const isP1 = user?.role === 'P1'
+  const canSeeP2    = user?.role === 'P2'
+  const isP1        = user?.role === 'P1'
+
+  // Effective display values (local overrides > auth context)
+  const displayName = localDisplayName ?? user?.name ?? user?.role ?? ''
+  const avatarUrl   = localAvatarUrl   ?? null
+  const initials    = displayName
+    .split(' ')
+    .filter(Boolean)
+    .map((n: string) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || (user?.initials ?? '??')
 
   return (
     <>
       <aside className="sidebar-fixed">
-        {/* Logo */}
+        {/* ── Logo ── */}
         <div className="px-5 py-5 border-b border-white/10 flex items-center gap-2.5">
           <div className="w-9 h-9 bg-yellow-400 rounded-lg flex items-center justify-center text-lg flex-shrink-0">🛡️</div>
           <div className="leading-tight">
@@ -96,45 +123,81 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Role badge */}
+        {/* ── Clickable Profile Card ── */}
         {user && (
-          <div className="mx-3 mt-3 px-3 py-2 rounded-lg border border-white/10 bg-white/5">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
-                style={{ background: user.avatarColor }}
-              >
-                {user.initials}
+          <button
+            onClick={() => setShowProfileSettings(true)}
+            className="mx-3 mt-3 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-150 w-[calc(100%-24px)] text-left group cursor-pointer"
+            title="Click to open profile settings"
+          >
+            <div className="flex items-center gap-2.5">
+              {/* Avatar */}
+              <div className="relative flex-shrink-0">
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={displayName}
+                    className="w-8 h-8 rounded-full object-cover border-2 border-white/20"
+                  />
+                ) : (
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white border-2 border-white/20 transition-transform group-hover:scale-105"
+                    style={{ background: user.avatarColor }}
+                  >
+                    {initials}
+                  </div>
+                )}
+                {/* Online dot */}
+                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-[#0f1c35]" />
               </div>
-              <div className="min-w-0">
-                <p className="text-white text-[11px] font-semibold truncate">{user.role}</p>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-[12px] font-semibold truncate leading-tight">
+                  {displayName}
+                </p>
                 <p className="text-white/40 text-[10px] truncate">{user.title}</p>
               </div>
-              {/* P1-only indicator */}
-              {isP1 && (
-                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 bg-violet-500/30 text-violet-300 rounded-full border border-violet-500/30 flex-shrink-0">
-                  SUPER
-                </span>
-              )}
+
+              {/* Settings caret */}
+              <div className="flex-shrink-0 flex items-center gap-1 text-white/30 group-hover:text-white/60 transition-colors">
+                {isP1 && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 bg-violet-500/30 text-violet-300 rounded-full border border-violet-500/30">
+                    SUPER
+                  </span>
+                )}
+                {/* Pencil icon hint */}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60 group-hover:opacity-100 transition-opacity">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </div>
             </div>
-          </div>
+
+            {/* Hover hint */}
+            <p className="text-white/20 text-[9px] mt-1.5 group-hover:text-white/40 transition-colors">
+              ✏️ Click to edit profile &amp; settings
+            </p>
+          </button>
         )}
 
-        {/* Documents nav */}
+        {/* ── Documents nav ── */}
         <div className="px-3 pt-5 pb-2">
           <div className="px-3 mb-2 text-[10px] font-bold tracking-widest uppercase text-white/30">Documents</div>
-          {canSeeP2 ? P2_NAV.map(item => (
-            <NavLink key={item.href} item={item}
-              active={pathname === item.href || pendingHref === item.href}
-              onNavigate={setPendingHref} />
-          )) : DOC_NAV.map(item => (
-            <NavLink key={item.href} item={item}
-              active={pathname === item.href || pendingHref === item.href}
-              onNavigate={setPendingHref} />
-          ))}
+          {canSeeP2
+            ? P2_NAV.map(item => (
+                <NavLink key={item.href} item={item}
+                  active={pathname === item.href || pendingHref === item.href}
+                  onNavigate={setPendingHref} />
+              ))
+            : DOC_NAV.map(item => (
+                <NavLink key={item.href} item={item}
+                  active={pathname === item.href || pendingHref === item.href}
+                  onNavigate={setPendingHref} />
+              ))
+          }
         </div>
 
-        {/* Administration nav — restricted to PD, P1 */}
+        {/* ── Administration nav ── */}
         {canSeeAdmin && (
           <div className="px-3 pt-3 pb-2">
             <div className="px-3 mb-2 text-[10px] font-bold tracking-widests uppercase text-white/30">Administration</div>
@@ -146,9 +209,8 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* User footer */}
+        {/* ── Footer ── */}
         <div className="mt-auto px-3 py-4 border-t border-white/10">
-          {/* Logout */}
           <button
             onClick={() => setShowLogoutConfirm(true)}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/10 transition text-[12px] font-medium"
@@ -163,10 +225,18 @@ export function Sidebar() {
         </div>
       </aside>
 
+      {/* ── Modals ── */}
       <LogoutConfirmModal
         open={showLogoutConfirm}
         onConfirm={handleLogoutConfirm}
         onCancel={() => setShowLogoutConfirm(false)}
+      />
+
+      <ProfileSettingsModal
+        open={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        user={user}
+        onProfileUpdated={handleProfileUpdated}
       />
     </>
   )
