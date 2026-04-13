@@ -2,12 +2,10 @@
 // components/ui/EnhancedDocumentGuard.tsx
 // Drop-in replacement/enhancement for BlurredDocumentGuard.
 //
-// Key differences from the original:
-//  • Respects ALWAYS_FULL_ACCESS_ROLES (PD, DPDA, DPDO, P1) — no blur ever
-//  • P2–P10: blurred + "Request View" button (not "Request Access" which was confusing)
-//  • View request modal has Purpose + Reason fields
-//  • Real-time status update via Supabase subscription
-//  • P1 can never be blocked
+// Fix: Tagged P2-P10 users now correctly see documents unblurred.
+// The previous version called hasApprovedViewRequest which missed the
+// tagged_admin_access baseline check. Now uses canAdminViewDocument from
+// rbac.ts which correctly checks both tagged_admin_access AND document_visibility.
 
 import { useEffect, useState, useCallback } from 'react'
 import { Lock } from 'lucide-react'
@@ -17,10 +15,11 @@ import { RequestViewModal } from '@/components/modals/RequestViewModal'
 import {
   roleHasFullAccess,
   roleNeedsViewRequest,
-  hasApprovedViewRequest,
-  getViewRequestForDoc,
   type DocumentViewRequest,
 } from '@/lib/viewRequests'
+// KEY FIX: Use canAdminViewDocument from rbac.ts instead of hasApprovedViewRequest
+// canAdminViewDocument correctly checks tagged_admin_access first, then document_visibility
+import { canAdminViewDocument, type DocType } from '@/lib/rbac'
 import { supabase } from '@/lib/supabase'
 import type { AdminRole } from '@/lib/auth'
 
@@ -29,7 +28,7 @@ interface EnhancedDocumentGuardProps {
   documentType: string
   documentTitle: string
   children: React.ReactNode
-  /** Preloaded canView state (skip DB call if already known) */
+  /** Preloaded canView state — if true, skips DB check entirely */
   canView?: boolean
   /** Compact / inline blur mode (for table cells) */
   compact?: boolean
@@ -45,7 +44,7 @@ export function EnhancedDocumentGuard({
 }: EnhancedDocumentGuardProps) {
   const { user } = useAuth()
   const [canView, setCanView] = useState<boolean | null>(
-    preloadedCanView !== undefined ? preloadedCanView : null
+    preloadedCanView === true ? true : null
   )
   const [existingRequest, setExistingRequest] = useState<DocumentViewRequest | null>(null)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
@@ -61,23 +60,42 @@ export function EnhancedDocumentGuard({
       return
     }
 
-    // Viewer roles: check approved access
-    const hasAccess = await hasApprovedViewRequest(documentId, user.role as AdminRole)
+    // KEY FIX: Use canAdminViewDocument which checks tagged_admin_access FIRST
+    // This ensures P2-P10 tagged by P1 see documents clearly without needing
+    // to submit a separate view request.
+    const hasAccess = await canAdminViewDocument(
+      user.role as AdminRole,
+      documentId,
+      documentType as DocType
+    )
     setCanView(hasAccess)
 
-    // Load existing request for status display
-    if (!hasAccess) {
-      const req = await getViewRequestForDoc(documentId, user.role as AdminRole)
-      // If access is no longer valid, treat prior approved requests as expired.
-      setExistingRequest(req?.status === 'approved' ? null : req)
+    // For users without access, load their existing request status for UI display
+    if (!hasAccess && roleNeedsViewRequest(user.role as AdminRole)) {
+      try {
+        const { data } = await supabase
+          .from('document_view_requests')
+          .select('*')
+          .eq('document_id', documentId)
+          .eq('requester_id', user.role)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        // Only show non-approved requests (approved ones should have granted access above)
+        if (data && data.status !== 'approved') {
+          setExistingRequest(data as DocumentViewRequest)
+        }
+      } catch {
+        // ignore
+      }
     }
 
     setCheckingAccess(false)
-  }, [user, documentId])
+  }, [user, documentId, documentType])
 
   useEffect(() => {
-    // Only trust preloaded TRUE as final. Preloaded FALSE can be stale,
-    // so still perform a live access check.
+    // If preloaded as true, trust it — no DB call needed
     if (preloadedCanView === true) {
       setCanView(true)
       setCheckingAccess(false)
@@ -86,10 +104,10 @@ export function EnhancedDocumentGuard({
     checkAccess()
   }, [preloadedCanView, checkAccess])
 
-  // Real-time: update canView when request is approved
+  // Real-time: update canView when a visibility row is inserted/updated
   useEffect(() => {
     if (!user || roleHasFullAccess(user.role as AdminRole)) return
-    if (canView) return // already has access, no need to listen
+    if (canView) return // already has access
 
     const channel = supabase
       .channel(`doc_guard_${documentId}_${user.role}`)
@@ -104,8 +122,8 @@ export function EnhancedDocumentGuard({
         (payload) => {
           const updated = payload.new as DocumentViewRequest
           if (updated.requester_id === user.role && updated.status === 'approved') {
-            setCanView(true)
-            setExistingRequest(updated)
+            // Re-run full access check (the visibility row should now exist)
+            checkAccess()
           } else if (updated.requester_id === user.role) {
             setExistingRequest(updated)
           }
@@ -126,10 +144,23 @@ export function EnhancedDocumentGuard({
           }
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'master_documents',
+          filter: `id=eq.${documentId}`,
+        },
+        () => {
+          // tagged_admin_access may have changed — re-check
+          checkAccess()
+        }
+      )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [user, documentId, canView])
+  }, [user, documentId, canView, checkAccess])
 
   // Loading state
   if (checkingAccess) {
@@ -294,7 +325,6 @@ function FullBlurredGuard({
       sublabel: 'P1 is reviewing your request',
       bg: 'bg-amber-50',
       border: 'border-amber-200',
-      btnCls: null,
     },
     approved: {
       icon: '✅',
@@ -302,7 +332,6 @@ function FullBlurredGuard({
       sublabel: 'Refreshing access…',
       bg: 'bg-emerald-50',
       border: 'border-emerald-200',
-      btnCls: null,
     },
     rejected: {
       icon: '❌',
@@ -310,7 +339,6 @@ function FullBlurredGuard({
       sublabel: existingRequest.rejection_reason ?? 'Contact P1 for details',
       bg: 'bg-red-50',
       border: 'border-red-200',
-      btnCls: 'bg-blue-600 text-white hover:bg-blue-700',
     },
   }[existingRequest.status] : null
 
@@ -329,7 +357,6 @@ function FullBlurredGuard({
         <div className="absolute inset-0 flex items-center justify-center bg-slate-900/20 backdrop-blur-[1px] rounded-xl">
           <div className="flex flex-col items-center text-center bg-white/96 backdrop-blur-sm px-5 py-4 rounded-2xl shadow-xl border border-slate-200/80 max-w-[260px] gap-2.5">
 
-            {/* Lock icon */}
             <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
               <Lock size={18} className="text-slate-500" />
             </div>
@@ -343,7 +370,6 @@ function FullBlurredGuard({
               </p>
             </div>
 
-            {/* Status badge or request button */}
             {requestStatusConfig ? (
               <div className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left ${requestStatusConfig.bg} ${requestStatusConfig.border}`}>
                 <span className="text-base">{requestStatusConfig.icon}</span>
@@ -356,7 +382,6 @@ function FullBlurredGuard({
               </div>
             ) : null}
 
-            {/* Action buttons */}
             {needsRequest && (!existingRequest || existingRequest.status === 'rejected') && (
               <button
                 onClick={onRequestClick}
@@ -384,7 +409,6 @@ function FullBlurredGuard({
         </div>
       </div>
 
-      {/* Request Modal */}
       {needsRequest && (
         <RequestViewModal
           open={requestModalOpen}

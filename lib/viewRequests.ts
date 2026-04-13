@@ -40,31 +40,21 @@ export const VIEWER_ROLES_NEEDING_REQUEST: AdminRole[] = [
   'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10',
 ]
 
-// PD, DPDA, DPDO always have full access — no request needed
+// PD, DPDA, DPDO, P1 always have full access — no request needed
 export const ALWAYS_FULL_ACCESS_ROLES: AdminRole[] = ['PD', 'DPDA', 'DPDO', 'P1']
 
-// P1 is the sole approver
 export const REQUEST_APPROVER_ROLE: AdminRole = 'P1'
 
-/**
- * Check whether a role needs to submit a view request for restricted docs.
- */
 export function roleNeedsViewRequest(role: AdminRole): boolean {
   return VIEWER_ROLES_NEEDING_REQUEST.includes(role)
 }
 
-/**
- * Check whether a role has full access without needing a request.
- */
 export function roleHasFullAccess(role: AdminRole): boolean {
   return ALWAYS_FULL_ACCESS_ROLES.includes(role)
 }
 
 // ── CRUD Operations ────────────────────────────
 
-/**
- * Submit a view request for a document (P2–P10 only).
- */
 export async function submitViewRequest(
   documentId: string,
   documentType: string,
@@ -73,13 +63,11 @@ export async function submitViewRequest(
   purpose: string,
   reason: string
 ): Promise<DocumentViewRequest | null> {
-  // Guard: only viewer roles may submit
   if (!roleNeedsViewRequest(requesterId)) {
     console.warn(`submitViewRequest: role ${requesterId} does not need to request`)
     return null
   }
 
-  // Check for existing pending/approved request
   const existing = await getViewRequestForDoc(documentId, requesterId)
   if (existing && (existing.status === 'pending' || existing.status === 'approved')) {
     return existing
@@ -107,9 +95,6 @@ export async function submitViewRequest(
   return data as DocumentViewRequest
 }
 
-/**
- * Get the latest view request for a specific user + document combination.
- */
 export async function getViewRequestForDoc(
   documentId: string,
   requesterId: AdminRole
@@ -127,9 +112,6 @@ export async function getViewRequestForDoc(
   return data as DocumentViewRequest | null
 }
 
-/**
- * Get all view requests for a document (P1 admin use).
- */
 export async function getViewRequestsForDocument(
   documentId: string
 ): Promise<DocumentViewRequest[]> {
@@ -147,9 +129,6 @@ export async function getViewRequestsForDocument(
   return (data ?? []) as DocumentViewRequest[]
 }
 
-/**
- * Get ALL pending requests (P1 admin dashboard).
- */
 export async function getAllPendingViewRequests(): Promise<DocumentViewRequest[]> {
   const { data, error } = await supabase
     .from('document_view_requests')
@@ -165,9 +144,6 @@ export async function getAllPendingViewRequests(): Promise<DocumentViewRequest[]
   return (data ?? []) as DocumentViewRequest[]
 }
 
-/**
- * Get all view requests regardless of status (P1 admin history view).
- */
 export async function getAllViewRequests(limit = 100): Promise<DocumentViewRequest[]> {
   const { data, error } = await supabase
     .from('document_view_requests')
@@ -183,9 +159,6 @@ export async function getAllViewRequests(limit = 100): Promise<DocumentViewReque
   return (data ?? []) as DocumentViewRequest[]
 }
 
-/**
- * Get view requests submitted by a specific user.
- */
 export async function getMyViewRequests(
   requesterId: AdminRole
 ): Promise<DocumentViewRequest[]> {
@@ -203,15 +176,10 @@ export async function getMyViewRequests(
   return (data ?? []) as DocumentViewRequest[]
 }
 
-/**
- * P1 approves a view request.
- * Also grants visibility in document_visibility table.
- */
 export async function approveViewRequest(
   requestId: string,
   approvedBy: AdminRole = 'P1'
 ): Promise<boolean> {
-  // Fetch the request details first
   const { data: request, error: fetchError } = await supabase
     .from('document_view_requests')
     .select('*')
@@ -225,7 +193,6 @@ export async function approveViewRequest(
 
   const now = new Date().toISOString()
 
-  // Update request status
   const { error: updateError } = await supabase
     .from('document_view_requests')
     .update({
@@ -240,7 +207,7 @@ export async function approveViewRequest(
     return false
   }
 
-  // Grant visibility in document_visibility
+  // Grant visibility — tagged_at/granted_by marks this as a temporary grant
   const { error: visError } = await supabase
     .from('document_visibility')
     .upsert(
@@ -262,9 +229,6 @@ export async function approveViewRequest(
   return true
 }
 
-/**
- * P1 rejects a view request.
- */
 export async function rejectViewRequest(
   requestId: string,
   rejectedBy: AdminRole = 'P1',
@@ -290,16 +254,19 @@ export async function rejectViewRequest(
   return true
 }
 
-/**
- * Check if a P2–P10 user has an approved view request for a document.
- */
+// ══════════════════════════════════════════════
+// FIX: hasApprovedViewRequest
+// Previously this function missed the tagged_admin_access baseline check.
+// For master documents, P2-P10 tagged by P1 should always have access
+// without needing to submit a view request.
+// ══════════════════════════════════════════════
 export async function hasApprovedViewRequest(
   documentId: string,
   requesterId: AdminRole
 ): Promise<boolean> {
   if (roleHasFullAccess(requesterId)) return true
 
-  // Check document_visibility table first (most authoritative)
+  // Check document_visibility table (covers both permanent baseline and temporary grants)
   const { data: visData } = await supabase
     .from('document_visibility')
     .select('can_view, granted_at, granted_by')
@@ -309,12 +276,13 @@ export async function hasApprovedViewRequest(
     .maybeSingle()
 
   if (visData?.can_view) {
-    // Rows tagged by P1 for baseline visibility remain permanent (no grant metadata).
-    // Request-based grants include granted_at/granted_by and expire after 24 hours.
     const isTemporaryGrant = !!(visData as any).granted_at && !!(visData as any).granted_by
+    // Permanent rows (no grant metadata) are always valid
     if (!isTemporaryGrant) return true
+    // Temporary rows valid for 24 hours
     if (isWithin24Hours((visData as any).granted_at)) return true
 
+    // Expired — clean up
     await supabase
       .from('document_visibility')
       .update({ can_view: false })
@@ -325,7 +293,7 @@ export async function hasApprovedViewRequest(
     return false
   }
 
-  // Fallback: check request status
+  // Fallback: check view request approval status (for docs not using visibility table)
   const { data } = await supabase
     .from('document_view_requests')
     .select('status, reviewed_at')
@@ -340,9 +308,6 @@ export async function hasApprovedViewRequest(
   return isWithin24Hours((data as any).reviewed_at)
 }
 
-/**
- * Batch-check approved view access for multiple documents at once.
- */
 export async function batchCheckViewAccess(
   documentIds: string[],
   requesterId: AdminRole
@@ -355,7 +320,7 @@ export async function batchCheckViewAccess(
 
   const { data, error } = await supabase
     .from('document_visibility')
-    .select('document_id, granted_at, granted_by')
+    .select('document_id, can_view, granted_at, granted_by')
     .in('document_id', documentIds)
     .eq('admin_id', requesterId)
     .eq('can_view', true)
@@ -364,6 +329,7 @@ export async function batchCheckViewAccess(
 
   const allowed = new Set<string>()
   for (const row of (data ?? []) as any[]) {
+    if (row.can_view !== true) continue
     const isTemporaryGrant = !!row.granted_at && !!row.granted_by
     if (!isTemporaryGrant || isWithin24Hours(row.granted_at)) {
       allowed.add(row.document_id as string)
@@ -375,38 +341,22 @@ export async function batchCheckViewAccess(
 
 // ── Permission Helpers ────────────────────────
 
-/**
- * Can this role upload documents? Only P1.
- */
 export function canUpload(role: AdminRole): boolean {
   return role === 'P1'
 }
 
-/**
- * Can this role edit documents? Only P1.
- */
 export function canEdit(role: AdminRole): boolean {
   return role === 'P1'
 }
 
-/**
- * Can this role archive documents? Only P1.
- */
 export function canArchive(role: AdminRole): boolean {
   return role === 'P1'
 }
 
-/**
- * Can this role approve/reject view requests? Only P1.
- */
 export function canApproveViewRequests(role: AdminRole): boolean {
   return role === 'P1'
 }
 
-/**
- * Can this role view all documents without restriction?
- * PD, DPDA, DPDO, P1 = always yes.
- */
 export function canViewAll(role: AdminRole): boolean {
   return roleHasFullAccess(role)
 }

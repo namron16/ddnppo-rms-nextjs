@@ -61,19 +61,12 @@ function isWithin24Hours(isoDate?: string | null): boolean {
 // UPLOAD AUTHORIZATION GUARD
 // ══════════════════════════════════════════════
 
-/**
- * Backend check: only P1 may upload.
- * Call this before any document insert.
- */
 export function assertCanUpload(role: AdminRole): void {
   if (role !== 'P1') {
     throw new Error(`Upload denied: role '${role}' is not authorized to upload documents. Only P1 may upload.`)
   }
 }
 
-/**
- * Safe version — returns boolean instead of throwing.
- */
 export function checkCanUpload(role: AdminRole): boolean {
   return role === 'P1'
 }
@@ -82,17 +75,6 @@ export function checkCanUpload(role: AdminRole): boolean {
 // DOCUMENT VISIBILITY  (TAG-BASED)
 // ══════════════════════════════════════════════
 
-/**
- * P1 sets which P2–P10 roles can view a document.
- * PD/DPDA/DPDO/P1 always bypass this (full access).
- * Previous tags for this document are wiped first.
- *
- * @param documentId       - document id
- * @param documentType     - 'master' | 'special_order' | etc.
- * @param selectedAdmins   - array of P2–P10 role ids
- * @param documentTitle    - used for audit log
- * @param taggedBy         - must be 'P1'
- */
 export async function setDocumentVisibility(
   documentId: string,
   documentType: DocType,
@@ -100,16 +82,13 @@ export async function setDocumentVisibility(
   documentTitle = '',
   taggedBy: AdminRole = 'P1'
 ): Promise<boolean> {
-  // Backend guard: only P1 may tag
   if (!checkCanUpload(taggedBy)) {
     console.error(`setDocumentVisibility denied for role: ${taggedBy}`)
     return false
   }
 
-  // Filter to valid viewer roles only (P2–P10)
   const validAdmins = selectedAdmins.filter(a => VIEWER_ROLES.includes(a))
 
-  // Master documents use tagged_admin_access as the baseline source of truth.
   if (documentType === 'master') {
     const { error } = await supabase
       .from('master_documents')
@@ -135,14 +114,13 @@ export async function setDocumentVisibility(
     return true
   }
 
-  // Wipe existing visibility records for this doc
+  // For non-master documents
   await supabase
     .from('document_visibility')
     .delete()
     .eq('document_id', documentId)
     .eq('document_type', documentType)
 
-  // Insert new tags
   if (validAdmins.length > 0) {
     const rows = validAdmins.map(adminId => ({
       document_id:   documentId,
@@ -161,7 +139,6 @@ export async function setDocumentVisibility(
     }
   }
 
-  // Write audit log
   await supabase.from('visibility_audit_log').insert({
     document_id:    documentId,
     document_type:  documentType,
@@ -176,26 +153,29 @@ export async function setDocumentVisibility(
   return true
 }
 
-/**
- * Backend visibility check for a single document.
- *
- * Rules:
- *   PD / DPDA / DPDO / P1 → always TRUE (full access)
- *   P2–P10 → TRUE only if row exists in document_visibility
- */
+// ══════════════════════════════════════════════
+// FIX: canAdminViewDocument
+// The original code had a critical bug: for master docs it returned false
+// for permanent (non-temporary) document_visibility rows. Fixed below.
+// ══════════════════════════════════════════════
+
 export async function canAdminViewDocument(
   adminId: AdminRole,
   documentId: string,
   documentType: DocType
 ): Promise<boolean> {
+  // PD, DPDA, DPDO, P1 always have full access
   if (FULL_ACCESS_ROLES.includes(adminId)) return true
 
-  // Check if role is permanently tagged for this document (master docs only)
+  // PRIMARY CHECK: tagged_admin_access on the master_documents record
+  // This is the canonical baseline set by P1 on upload/edit.
   if (documentType === 'master') {
     const taggedRoles = await getDocumentTaggedRoles(documentId, 'master')
     if (isRoleTaggedForDocument(adminId, taggedRoles)) return true
   }
 
+  // SECONDARY CHECK: document_visibility table (for non-master docs,
+  // or for temporary request-approved access on master docs)
   const { data, error } = await supabase
     .from('document_visibility')
     .select('can_view, granted_at, granted_by')
@@ -207,13 +187,14 @@ export async function canAdminViewDocument(
   if (error || !data) return false
   if (data.can_view !== true) return false
 
-  // Temporary grants (from request approvals) expire after 24 hours.
+  // Rows WITHOUT granted_at/granted_by are permanent baseline grants — always allow.
   const isTemporaryGrant = !!(data as any).granted_at && !!(data as any).granted_by
-  if (documentType === 'master' && !isTemporaryGrant) return false
   if (!isTemporaryGrant) return true
 
+  // Temporary grants (from view requests) expire after 24 hours.
   if (isWithin24Hours((data as any).granted_at)) return true
 
+  // Grant expired — revoke it in DB
   await supabase
     .from('document_visibility')
     .update({ can_view: false })
@@ -225,16 +206,11 @@ export async function canAdminViewDocument(
   return false
 }
 
-/**
- * Batch-check visibility for a list of document IDs.
- * Returns a Set of document IDs the user can view.
- */
 export async function getBatchVisibility(
   adminId: AdminRole,
   documentIds: string[],
   documentType: DocType
 ): Promise<Set<string>> {
-  // Full-access roles see everything
   if (FULL_ACCESS_ROLES.includes(adminId)) {
     return new Set(documentIds)
   }
@@ -251,13 +227,14 @@ export async function getBatchVisibility(
         .in('id', documentIds),
       supabase
         .from('document_visibility')
-        .select('document_id, granted_at, granted_by')
+        .select('document_id, can_view, granted_at, granted_by')
         .in('document_id', documentIds)
         .eq('document_type', 'master')
         .eq('admin_id', adminId)
         .eq('can_view', true),
     ])
 
+    // Check tagged_admin_access (baseline permanent grants)
     for (const row of (masters ?? []) as any[]) {
       const taggedRoles = parseTaggedAdminAccess(row.tagged_admin_access)
       if (taggedRoles.includes(adminId)) {
@@ -265,10 +242,13 @@ export async function getBatchVisibility(
       }
     }
 
+    // Also check document_visibility rows
     if (!tempError) {
       for (const row of (tempRows ?? []) as any[]) {
+        if (row.can_view !== true) continue
         const isTemporaryGrant = !!row.granted_at && !!row.granted_by
-        if (isTemporaryGrant && isWithin24Hours(row.granted_at)) {
+        // Allow both permanent rows and valid temporary grants
+        if (!isTemporaryGrant || isWithin24Hours(row.granted_at)) {
           allowed.add(row.document_id)
         }
       }
@@ -279,7 +259,7 @@ export async function getBatchVisibility(
 
   const { data, error } = await supabase
     .from('document_visibility')
-    .select('document_id, granted_at, granted_by')
+    .select('document_id, can_view, granted_at, granted_by')
     .in('document_id', documentIds)
     .eq('document_type', documentType)
     .eq('admin_id', adminId)
@@ -289,18 +269,16 @@ export async function getBatchVisibility(
 
   const allowed = new Set<string>()
   for (const row of (data ?? []) as any[]) {
+    if (row.can_view !== true) continue
     const isTemporaryGrant = !!row.granted_at && !!row.granted_by
     if (!isTemporaryGrant || isWithin24Hours(row.granted_at)) {
-      allowed.add(row.document_id)
+      allowed.add(row.document_id as string)
     }
   }
 
   return allowed
 }
 
-/**
- * Parse tagged admin access into an AdminRole array.
- */
 export function parseTaggedAdminAccess(tagged: AdminRole[] | string | null | undefined): AdminRole[] {
   if (!tagged) return []
   if (Array.isArray(tagged)) return tagged.filter(s => !!s) as AdminRole[]
@@ -310,24 +288,16 @@ export function parseTaggedAdminAccess(tagged: AdminRole[] | string | null | und
     .filter(s => s.length > 0)
 }
 
-/**
- * Check if an admin role is in the tagged access list.
- */
 export function isRoleTaggedForDocument(role: AdminRole, taggedRoles: AdminRole[] | string | null | undefined): boolean {
   if (!taggedRoles) return false
   const parsed = typeof taggedRoles === 'string' ? parseTaggedAdminAccess(taggedRoles) : taggedRoles
   return parsed.includes(role)
 }
 
-/**
- * Get the list of tagged admin IDs for a document (baseline access, set by P1).
- * Reads from the master_documents.tagged_admin_access field.
- */
 export async function getDocumentTaggedRoles(
   documentId: string,
   documentType: DocType
 ): Promise<AdminRole[]> {
-  // For master documents, read from the master_documents table
   if (documentType === 'master') {
     const { data, error } = await supabase
       .from('master_documents')
@@ -339,24 +309,19 @@ export async function getDocumentTaggedRoles(
     return parseTaggedAdminAccess(data.tagged_admin_access as AdminRole[] | string | null | undefined)
   }
 
-  // For other document types, fall back to visibility table
   const { data, error } = await supabase
     .from('document_visibility')
     .select('admin_id')
     .eq('document_id',   documentId)
     .eq('document_type', documentType)
     .eq('can_view',      true)
-    .is('granted_by', null)   // Only tagged, not temporary grants
+    .is('granted_by', null)
     .is('granted_at', null)
 
   if (error) return []
   return (data ?? []).map((r: any) => r.admin_id as AdminRole)
 }
 
-/**
- * Get the list of all admin IDs with visibility for a document (tagged + temporary grants).
- * Used for batch operations; prefer getDocumentTaggedRoles for display/control logic.
- */
 export async function getDocumentVisibility(
   documentId: string,
   documentType: DocType
