@@ -1,7 +1,7 @@
 'use client'
 // components/modals/AddJournalEntryModal.tsx
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
@@ -10,30 +10,54 @@ import { AddJournalEntrySchema, zodErrors, type AddJournalEntryInput } from '@/l
 interface Props {
   open: boolean
   onClose: () => void
-  onCreate?: (entry: AddJournalEntryInput) => void
+  title?: string
+  submitLabel?: string
+  initialValue?: Partial<AddJournalEntryInput> & { content?: string }
+  onSubmit?: (entry: AddJournalEntryInput) => void | Promise<void>
 }
 
-export function AddJournalEntryModal({ open, onClose, onCreate }: Props) {
+const EMPTY_FORM = { title: '', type: 'MEMO' as const, author: '', date: '', content: '' }
+
+export function AddJournalEntryModal({
+  open,
+  onClose,
+  title = 'New Journal Entry',
+  submitLabel = '✅ Create Entry',
+  initialValue,
+  onSubmit,
+}: Props) {
   const { toast } = useToast()
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [form, setForm] = useState({ title: '', type: 'MEMO', author: '', date: '', content: '' })
+  const [form, setForm] = useState(EMPTY_FORM)
+
+  useEffect(() => {
+    if (!open) return
+    setErrors({})
+    setForm({
+      title: initialValue?.title ?? '',
+      type: initialValue?.type ?? 'MEMO',
+      author: initialValue?.author ?? '',
+      date: initialValue?.date ?? '',
+      content: initialValue?.content ?? '',
+    })
+  }, [initialValue, open])
 
   const field = (key: string, value: string) => {
     setForm(p => ({ ...p, [key]: value }))
     setErrors(p => ({ ...p, [key]: '' }))
   }
 
-  function submit() {
+  async function submit() {
     const result = AddJournalEntrySchema.safeParse(form)
     if (!result.success) {
       setErrors(zodErrors(result.error))
       return
     }
     setErrors({})
-    toast.success(`Journal entry "${result.data.title}" created.`)
-    onCreate?.(result.data)
+    await onSubmit?.(result.data)
+    toast.success(`Journal entry "${result.data.title}" saved.`)
     onClose()
-    setForm({ title: '', type: 'MEMO', author: '', date: '', content: '' })
+    setForm(EMPTY_FORM)
   }
 
   const cls = (f: string) =>
@@ -42,7 +66,7 @@ export function AddJournalEntryModal({ open, onClose, onCreate }: Props) {
     }`
 
   return (
-    <Modal open={open} onClose={onClose} title="New Journal Entry" width="max-w-lg">
+    <Modal open={open} onClose={onClose} title={title} width="max-w-lg">
       <div className="p-6 space-y-4">
 
         <div>
@@ -89,7 +113,7 @@ export function AddJournalEntryModal({ open, onClose, onCreate }: Props) {
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>✅ Create Entry</Button>
+          <Button variant="primary" onClick={submit}>{submitLabel}</Button>
         </div>
       </div>
     </Modal>
