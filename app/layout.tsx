@@ -10,8 +10,8 @@ import { AuthProvider }  from '@/lib/auth'
 import { ToastProvider } from '@/components/ui/Toast'
 
 export const metadata: Metadata = {
-  title: 'DDNPPO Records Management System',
-  description: 'Secure, centralized document management for Davao del Norte Provincial Police Office personnel.',
+  title: 'DNPPO Records Management System',
+  description: 'Secure, centralized document management for Davao Norte Provincial Police Office personnel.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
