@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -8,88 +8,20 @@ import { SearchInput } from '@/components/ui/SearchInput'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Modal } from '@/components/ui/Modal'
 import { ToolbarSelect } from '@/components/ui/Toolbar'
+import { useToast } from '@/components/ui/Toast'
 import { AddJournalEntryModal } from '@/components/modals/AddJournalEntryModal'
 import { useDisclosure, useModal, useSearch } from '@/hooks'
 import type { AddJournalEntryInput } from '@/lib/validations'
 import type { JournalEntry } from '@/types'
+import { addDailyJournal, getDailyJournals, type DailyJournalRecord } from '@/lib/data'
 
 type JournalStatus = 'Draft' | 'Filed' | 'Reviewed'
 
-type JournalRecord = JournalEntry & {
+type JournalRecord = DailyJournalRecord & {
   content: string
-  status: JournalStatus
-  attachments: number
   summary: string
+  status: JournalStatus
 }
-
-const JOURNAL_TEMPLATES: JournalRecord[] = [
-  {
-    id: 'jrnl-1001',
-    title: 'Morning Command Briefing',
-    type: 'MEMO',
-    author: 'PCol. Ramon Dela Cruz',
-    date: '2026-04-13',
-    content: 'Reviewed overnight incident reports, visitor logs, and pending inter-office coordination items before rollout.',
-    status: 'Reviewed',
-    attachments: 2,
-    summary: 'Shift coordination and priority checks for the first watch.',
-  },
-  {
-    id: 'jrnl-1002',
-    title: 'Field Inspection Notes',
-    type: 'REPORT',
-    author: 'Maj. Ana Santos',
-    date: '2026-04-12',
-    content: 'Inspected perimeter lighting, access control points, and document turnover procedures across three sectors.',
-    status: 'Filed',
-    attachments: 4,
-    summary: 'Operational review of perimeter and records handling.',
-  },
-  {
-    id: 'jrnl-1003',
-    title: 'Duty Post Log',
-    type: 'LOG',
-    author: 'Cpt. Jose Reyes',
-    date: '2026-04-12',
-    content: 'All posts accounted for at 1800H. No unusual movement observed during evening inventory and sign-off.',
-    status: 'Filed',
-    attachments: 1,
-    summary: 'End-of-shift sign-off and accountability check.',
-  },
-  {
-    id: 'jrnl-1004',
-    title: 'Administrative Memo',
-    type: 'MEMO',
-    author: 'Lt. Maria Lopez',
-    date: '2026-04-11',
-    content: 'Issued a reminder on document naming conventions and the updated routing sequence for approvals.',
-    status: 'Draft',
-    attachments: 0,
-    summary: 'Reminder on filing discipline and approval routing.',
-  },
-  {
-    id: 'jrnl-1005',
-    title: 'Operations Summary',
-    type: 'REPORT',
-    author: 'PSSg. Mark Villanueva',
-    date: '2026-04-10',
-    content: 'Summarized service calls, request counts, and follow-up items captured during the last 24-hour cycle.',
-    status: 'Reviewed',
-    attachments: 3,
-    summary: 'Daily operational roll-up for desk review.',
-  },
-  {
-    id: 'jrnl-1006',
-    title: 'Night Watch Log',
-    type: 'LOG',
-    author: 'Sgt. Paul Torres',
-    date: '2026-04-09',
-    content: 'Weather remained fair throughout the shift. Gate inspections and radio checks were completed on schedule.',
-    status: 'Filed',
-    attachments: 0,
-    summary: 'Quiet watch with completed security checks.',
-  },
-]
 
 function formatDate(value: string) {
   return new Date(`${value}T00:00:00`).toLocaleDateString('en-PH', {
@@ -176,8 +108,10 @@ function ViewJournalModal({
 }
 
 export default function DailyJournalsPage() {
+  const { toast } = useToast()
   const addModal = useModal()
   const viewDisc = useDisclosure<JournalRecord>()
+  const [loading, setLoading] = useState(true)
   const [entries, setEntries] = useState<JournalRecord[]>([])
   const [activeType, setActiveType] = useState<'ALL' | JournalEntry['type']>('ALL')
 
@@ -188,13 +122,38 @@ export default function DailyJournalsPage() {
   }, [activeType, searched])
 
   const journalStats = useMemo(() => ({
-    all: entries?.length,
-    memo: entries?.filter(entry => entry.type === 'MEMO').length,
-    report: entries?.filter(entry => entry.type === 'REPORT').length,
-    log: entries?.filter(entry => entry.type === 'LOG').length,
+    all: entries.length,
+    memo: entries.filter(entry => entry.type === 'MEMO').length,
+    report: entries.filter(entry => entry.type === 'REPORT').length,
+    log: entries.filter(entry => entry.type === 'LOG').length,
   }), [entries])
 
-  function handleCreate(input: AddJournalEntryInput) {
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadDailyJournals() {
+      const data = await getDailyJournals()
+      if (!isMounted) return
+
+      const normalised: JournalRecord[] = data.map(entry => ({
+        ...entry,
+        content: entry.content ?? 'No content was provided for this entry.',
+        summary: entry.summary ?? (entry.content?.slice(0, 120) || 'No summary available.'),
+        status: (entry.status ?? 'Draft') as JournalStatus,
+      }))
+
+      setEntries(normalised)
+      setLoading(false)
+    }
+
+    loadDailyJournals()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  async function handleCreate(input: AddJournalEntryInput) {
     const now = new Date()
     const status: JournalStatus = input.type === 'MEMO' ? 'Draft' : input.type === 'REPORT' ? 'Reviewed' : 'Filed'
 
@@ -212,9 +171,11 @@ export default function DailyJournalsPage() {
         : 'Newly created entry waiting for final review.',
     }
 
+    await addDailyJournal(nextEntry)
     setEntries(prev => [nextEntry, ...prev])
     addModal.close()
     viewDisc.close()
+    toast.success('Daily journal entry saved to database.')
   }
 
   return (
@@ -277,7 +238,11 @@ export default function DailyJournalsPage() {
             </Button>
           </div>
 
-          {filteredEntries.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : filteredEntries.length === 0 ? (
             <EmptyState
               icon="📒"
               title="No journal entries found"

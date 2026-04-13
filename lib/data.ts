@@ -6,6 +6,16 @@ import type {
   ActivityLog, OrgNode
 } from '@/types'
 
+export type DailyJournalStatus = 'Draft' | 'Filed' | 'Reviewed'
+
+export type DailyJournalRecord = JournalEntry & {
+  content?: string
+  summary?: string
+  status: DailyJournalStatus
+  attachments: number
+  archived?: boolean
+}
+
 /* ════════════════════════════════════════════
    USERS — kept for authentication only
 ════════════════════════════════════════════ */
@@ -223,6 +233,84 @@ export async function archiveSpecialOrder(id: string): Promise<void> {
   const { error } = await supabase
     .from('special_orders').update({ status: 'ARCHIVED' }).eq('id', id)
   if (error) console.warn('Supabase unavailable (archive special_order):', error.message)
+}
+
+/* ════════════════════════════════════════════
+   DAILY JOURNALS
+════════════════════════════════════════════ */
+export async function getDailyJournals(): Promise<DailyJournalRecord[]> {
+  const { data, error } = await supabase
+    .from('daily_journals')
+    .select('*')
+    .eq('archived', false)
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.warn('Supabase unavailable (daily_journals):', error.message)
+    return []
+  }
+
+  return (data ?? []).map(d => ({
+    id: d.id,
+    title: d.title,
+    type: d.type,
+    author: d.author,
+    date: d.date,
+    content: d.content ?? undefined,
+    summary: d.summary ?? undefined,
+    status: d.status,
+    attachments: d.attachments ?? 0,
+    archived: d.archived ?? false,
+  }))
+}
+
+export async function addDailyJournal(entry: DailyJournalRecord): Promise<void> {
+  const { error } = await supabase
+    .from('daily_journals')
+    .insert({
+      id: entry.id,
+      title: entry.title,
+      type: entry.type,
+      author: entry.author,
+      date: entry.date,
+      content: entry.content ?? null,
+      summary: entry.summary ?? null,
+      status: entry.status,
+      attachments: entry.attachments,
+      archived: entry.archived ?? false,
+    })
+
+  if (error) console.warn('Supabase unavailable (add daily_journal):', error.message)
+}
+
+export async function updateDailyJournal(entry: DailyJournalRecord): Promise<void> {
+  const { error } = await supabase
+    .from('daily_journals')
+    .update({
+      title: entry.title,
+      type: entry.type,
+      author: entry.author,
+      date: entry.date,
+      content: entry.content ?? null,
+      summary: entry.summary ?? null,
+      status: entry.status,
+      attachments: entry.attachments,
+      archived: entry.archived ?? false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', entry.id)
+
+  if (error) console.warn('Supabase unavailable (update daily_journal):', error.message)
+}
+
+export async function archiveDailyJournal(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('daily_journals')
+    .update({ archived: true, updated_at: new Date().toISOString() })
+    .eq('id', id)
+
+  if (error) console.warn('Supabase unavailable (archive daily_journal):', error.message)
 }
 
 /* ════════════════════════════════════════════
