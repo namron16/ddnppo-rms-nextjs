@@ -1135,7 +1135,8 @@ export default function AdminOrdersPage() {
                   </div>
                 ))}
                 <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-1">
-                  <span className="text-[11px] text-slate-400">📎 = top-level attachments</span>
+                  <Paperclip className="h-3 w-3 text-slate-400" />
+                  <span className="text-[11px] text-slate-400">= top-level attachments</span>
                 </div>
               </div>
             </div>
