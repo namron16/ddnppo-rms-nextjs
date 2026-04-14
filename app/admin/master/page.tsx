@@ -14,6 +14,7 @@ import { Modal }            from '@/components/ui/Modal'
 import { AddDocumentModal } from '@/components/modals/AddDocumentModal'
 import { ApprovalWorkflowModal }  from '@/components/modals/ApprovalWorkflowModal'
 import { RequestViewModal } from '@/components/modals/RequestViewModal'
+import { ForwardToP1InboxModal } from '@/components/modals/ForwardToP1InboxModal'
 import { ApprovalStatusBadge } from '@/components/ui/BlurredDocumentGuard'
 import { VisibilityTagSelector } from '@/components/ui/VisibilityTagSelector'
 import { UploadGuard }      from '@/components/ui/UploadGuard'
@@ -27,13 +28,14 @@ import {
   getMasterDocuments, addMasterDocument, updateMasterDocument,
   archiveMasterDocument, addArchivedDoc, getArchivedDocs,
 } from '@/lib/data'
+import { forwardToP1Inbox } from '@/lib/p1Inbox'
 import {
   getApproval, getPendingApprovals, getBatchVisibility,
   getDocumentTaggedRoles, canAdminViewDocument,
   createApproval, reviewByDPDAorDPDO, finalApproveByPD,
   type DocumentApproval, type DocType,
 } from '@/lib/rbac'
-import { logViewDocument } from '@/lib/adminLogger'
+import { logForwardAttachment, logForwardDocument, logViewDocument } from '@/lib/adminLogger'
 import {
   canUploadDocuments, canReviewDocuments, canFinalApprove,
   hasFullDocumentAccess, ROLE_META,
@@ -48,6 +50,18 @@ type DocEnriched = DocWithUrl & {
   canView?: boolean
   isRestricted: boolean
   taggedRoles?: AdminRole[]
+}
+
+type ForwardTarget = {
+  itemKind: 'document' | 'attachment'
+  senderRole: AdminRole
+  title: string
+  fileName: string
+  fileUrl: string
+  fileSize: string
+  fileType: string
+  sourceDocumentId?: string
+  sourceAttachmentId?: string
 }
 
 // ── Attachment types (same as before) ─────────
@@ -145,47 +159,6 @@ function InlineFileViewerModal({ fileUrl, fileName, open, onClose }: {
               </a>
             </div>
           )}
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-// ── Forward Modal ──────────────────────────────
-function ForwardModal({ doc, open, onClose }: { doc: DocEnriched | null; open: boolean; onClose: () => void }) {
-  const { toast } = useToast()
-  const [recipient, setRecipient] = useState('')
-  const [remarks, setRemarks] = useState('')
-  function submit() {
-    if (!recipient) { toast.error('Select a recipient.'); return }
-    toast.success(`Document forwarded to ${recipient}.`)
-    setRecipient(''); setRemarks(''); onClose()
-  }
-  const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
-  return (
-    <Modal open={open} onClose={onClose} title="Forward Document" width="max-w-md">
-      <div className="p-6 space-y-4">
-        <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold mb-0.5">Document</p>
-          <p className="text-sm font-semibold text-slate-800">{doc?.title}</p>
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Forward To <span className="text-red-500">*</span></label>
-          <select className={cls} value={recipient} onChange={e => setRecipient(e.target.value)}>
-            <option value="">Select recipient…</option>
-            <option>P/Col. Ramon Dela Cruz — Provincial Director</option>
-            <option>P/Capt. Sara Yap — PCADU Unit Chief</option>
-            <option>P/Capt. Jun Santos — PDMU Unit Chief</option>
-            <option>P/Maj. Dan Lim — PPPU Unit Chief</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Remarks</label>
-          <textarea rows={3} className={`${cls} resize-none`} value={remarks} onChange={e => setRemarks(e.target.value)} />
-        </div>
-        <div className="flex justify-end gap-2.5">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>➡ Forward</Button>
         </div>
       </div>
     </Modal>
@@ -319,12 +292,50 @@ export default function MasterPage() {
   const editModal      = useModal()
   const archiveDisc    = useDisclosure<string>()
   const approvalModal  = useModal()
+  const [forwardTarget, setForwardTarget] = useState<ForwardTarget | null>(null)
 
   // Role flags
   const isP1       = user?.role === 'P1'
   const isReviewer  = user?.role === 'DPDA' || user?.role === 'DPDO'
   const isPD        = user?.role === 'PD'
   const isPrivileged = user ? hasFullDocumentAccess(user.role) : false
+
+  function openForwardModal(target: ForwardTarget) {
+    setForwardTarget(target)
+    forwardModal.open()
+  }
+
+  async function handleForwardSubmit(notes: string) {
+    if (!user || !forwardTarget) return
+
+    const forwarded = await forwardToP1Inbox({
+      senderId: user.role as AdminRole,
+      itemKind: forwardTarget.itemKind,
+      title: forwardTarget.title,
+      fileName: forwardTarget.fileName,
+      fileUrl: forwardTarget.fileUrl,
+      fileSize: forwardTarget.fileSize,
+      fileType: forwardTarget.fileType,
+      sourceDocumentId: forwardTarget.sourceDocumentId,
+      sourceAttachmentId: forwardTarget.sourceAttachmentId,
+      notes: notes || null,
+    })
+
+    if (!forwarded) {
+      toast.error('Could not forward the item to P1 inbox.')
+      return
+    }
+
+    if (forwardTarget.itemKind === 'attachment') {
+      await logForwardAttachment(forwardTarget.fileName, 'P1 inbox').catch(() => {})
+    } else {
+      await logForwardDocument(forwardTarget.title, 'P1 inbox').catch(() => {})
+    }
+
+    toast.success('Item forwarded to P1 inbox.')
+    forwardModal.close()
+    setForwardTarget(null)
+  }
 
   useEffect(() => {
     async function loadAll() {
@@ -737,8 +748,27 @@ export default function MasterPage() {
 
                     <div className="flex gap-2 flex-shrink-0 flex-wrap">
                       {/* Full-access roles: forward + edit */}
-                      {isPrivileged && (
-                        <Button variant="outline" size="sm" onClick={forwardModal.open}>➡ Forward</Button>
+                      {user && selection?.fileUrl && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const fileUrl = selection.fileUrl
+                            if (!fileUrl) return
+                            openForwardModal({
+                              itemKind: 'document',
+                              senderRole: user?.role as AdminRole,
+                              title: selection.title,
+                              fileName: `${selection.title}.${selection.type.toLowerCase()}`,
+                              fileUrl,
+                              fileSize: selection.size,
+                              fileType: selection.type,
+                              sourceDocumentId: selection.id,
+                            })
+                          }}
+                        >
+                          ➡ Forward
+                        </Button>
                       )}
                       {/* P1-only: edit + archive */}
                       {isP1 && (
@@ -874,6 +904,24 @@ export default function MasterPage() {
                                   className="text-[10px] font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition">
                                   👁
                                 </button>
+                                  <button
+                                    onClick={() => {
+                                      openForwardModal({
+                                        itemKind: 'attachment',
+                                        senderRole: user?.role as AdminRole,
+                                        title: att.file_name,
+                                        fileName: att.file_name,
+                                        fileUrl: att.file_url,
+                                        fileSize: att.file_size,
+                                        fileType: att.file_type,
+                                        sourceDocumentId: att.document_id,
+                                        sourceAttachmentId: att.id,
+                                      })
+                                    }}
+                                    className="text-[10px] font-semibold px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded hover:bg-indigo-100 transition"
+                                  >
+                                    ➡
+                                  </button>
                                 <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
                                   <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">⬇</button>
                                 </a>
@@ -929,8 +977,16 @@ export default function MasterPage() {
 
       {/* Modals */}
       <AddDocumentModal open={uploadModal.isOpen} onClose={uploadModal.close} onAdd={handleAdd} />
-      <ForwardModal doc={selection} open={forwardModal.isOpen} onClose={forwardModal.close} />
       <EditModal doc={selection} open={editModal.isOpen} onClose={editModal.close} onSave={handleSave} />
+      <ForwardToP1InboxModal
+        open={forwardModal.isOpen}
+        target={forwardTarget}
+        onClose={() => {
+          forwardModal.close()
+          setForwardTarget(null)
+        }}
+        onSubmit={handleForwardSubmit}
+      />
       {selection && (
         <RequestViewModal
           open={requestViewOpen}

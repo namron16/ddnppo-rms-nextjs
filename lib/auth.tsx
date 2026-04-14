@@ -129,12 +129,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false)
   }, [])
 
-  // Mark inactive + log logout when tab/window closes
+  // Mark inactive when tab/window closes. Do not log logout here because
+  // browser refresh also triggers unload and would create false logout logs.
   useEffect(() => {
     if (!user) return
     const handleUnload = () => {
       setAdminInactive(user.id).catch(() => {})
-      logLogout(user.id).catch(() => {})
     }
     window.addEventListener('beforeunload', handleUnload)
     return () => window.removeEventListener('beforeunload', handleUnload)

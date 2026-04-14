@@ -11,6 +11,7 @@ import { AlertWarning } from '@/components/ui/AlertWarning'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Modal } from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
+import { ForwardToP1InboxModal } from '@/components/modals/ForwardToP1InboxModal'
 import { useDisclosure, useModal } from '@/hooks'
 import { useToast } from '@/components/ui/Toast'
 import { useAuth } from '@/lib/auth'
@@ -23,11 +24,13 @@ import {
   getConfidentialDocs,
   updateConfidentialDoc,
 } from '@/lib/data'
+import { forwardToP1Inbox } from '@/lib/p1Inbox'
 import { classificationBadgeClass } from '@/lib/utils'
 import {
   getDocumentVisibility,
   setClassifiedDocumentVisibility,
 } from '@/lib/rbac'
+import { logForwardDocument } from '@/lib/adminLogger'
 import type { AdminRole } from '@/lib/auth'
 import type { ConfidentialDoc } from '@/types'
 
@@ -36,6 +39,17 @@ type ClassifiedDocRecord = ConfidentialDoc & {
   passwordHash?: string
   archived?: boolean
   visibleRoles: AdminRole[]
+}
+
+type ForwardTarget = {
+  itemKind: 'document'
+  senderRole: AdminRole
+  title: string
+  fileName: string
+  fileUrl: string
+  fileSize: string
+  fileType: string
+  sourceDocumentId: string
 }
 
 type DocUpdatePayload = {
@@ -54,6 +68,11 @@ type EditModalProps = {
   onSubmit: (payload: DocUpdatePayload) => Promise<boolean>
 }
 const ARCHIVE_LABEL = 'Classified Document'
+
+function fileNameFromUrl(fileUrl: string, fallback: string): string {
+  const rawName = fileUrl.split('/').pop()?.split('?')[0]
+  return rawName ? decodeURIComponent(rawName) : fallback
+}
 
 function hashPassword(password: string): Promise<string> {
   const data = new TextEncoder().encode(password)
@@ -76,7 +95,17 @@ function visibilitySummary(roles: AdminRole[]) {
   return `P2 + ${recipients.join(', ')}`
 }
 
-function DocumentDetailModal({ open, doc, onClose }: { open: boolean; doc: ClassifiedDocRecord | null; onClose: () => void }) {
+function DocumentDetailModal({
+  open,
+  doc,
+  onClose,
+  onForward,
+}: {
+  open: boolean
+  doc: ClassifiedDocRecord | null
+  onClose: () => void
+  onForward: () => void
+}) {
   return (
     <Modal open={open} onClose={onClose} title="Classified Document Details" width="max-w-2xl">
       <div className="p-6 space-y-5">
@@ -109,9 +138,12 @@ function DocumentDetailModal({ open, doc, onClose }: { open: boolean; doc: Class
         {doc?.fileUrl ? (
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-1">File</p>
-            <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-              Open attached file
-            </a>
+            <div className="flex items-center gap-2 flex-wrap">
+              <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                Open attached file
+              </a>
+              <Button variant="outline" size="sm" onClick={onForward}>➡ Forward to P1 Inbox</Button>
+            </div>
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
@@ -356,11 +388,13 @@ export default function ClassifiedDocumentsPage() {
   const [archivedCount, setArchivedCount] = useState(0)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'private'>('all')
+  const [forwardTarget, setForwardTarget] = useState<ForwardTarget | null>(null)
 
   const addModal = useModal()
   const detailDisc = useDisclosure<ClassifiedDocRecord>()
   const editDisc = useDisclosure<ClassifiedDocRecord>()
   const archiveDisc = useDisclosure<ClassifiedDocRecord>()
+  const forwardModal = useModal()
 
   const canManage = user?.role === 'P2'
 
@@ -481,6 +515,47 @@ export default function ClassifiedDocumentsPage() {
     }
   }
 
+  function openForwardModal(doc: ClassifiedDocRecord) {
+    if (!doc.fileUrl) return
+    const fileName = fileNameFromUrl(doc.fileUrl, doc.title)
+    setForwardTarget({
+      itemKind: 'document',
+      senderRole: user?.role as AdminRole,
+      title: doc.title,
+      fileName,
+      fileUrl: doc.fileUrl,
+      fileSize: 'Not recorded',
+      fileType: filePreviewLabel(fileName).label,
+      sourceDocumentId: doc.id,
+    })
+    forwardModal.open()
+  }
+
+  async function handleForwardSubmit(notes: string) {
+    if (!forwardTarget) return
+
+    const forwarded = await forwardToP1Inbox({
+      senderId: user?.role as AdminRole,
+      itemKind: 'document',
+      title: forwardTarget.title,
+      fileName: forwardTarget.fileName,
+      fileUrl: forwardTarget.fileUrl,
+      fileSize: forwardTarget.fileSize,
+      fileType: forwardTarget.fileType,
+      sourceDocumentId: forwardTarget.sourceDocumentId,
+      notes: notes || null,
+    })
+
+    if (!forwarded) {
+      toast.error('Could not forward the file to P1 inbox.')
+      return
+    }
+
+    await logForwardDocument(forwardTarget.title, 'P1 inbox').catch(() => {})
+    toast.success('File forwarded to P1 inbox.')
+    forwardModal.close()
+    setForwardTarget(null)
+  }
   return (
     <>
       <PageHeader title="Classified Documents" />
@@ -629,6 +704,9 @@ export default function ClassifiedDocumentsPage() {
         open={detailDisc.isOpen}
         doc={detailDisc.payload ?? null}
         onClose={detailDisc.close}
+        onForward={() => {
+          if (detailDisc.payload) openForwardModal(detailDisc.payload)
+        }}
       />
 
       <EditDocumentModal
@@ -646,6 +724,16 @@ export default function ClassifiedDocumentsPage() {
         variant="danger"
         onConfirm={handleArchive}
         onCancel={archiveDisc.close}
+      />
+
+      <ForwardToP1InboxModal
+        open={forwardModal.isOpen}
+        target={forwardTarget}
+        onClose={() => {
+          forwardModal.close()
+          setForwardTarget(null)
+        }}
+        onSubmit={handleForwardSubmit}
       />
     </>
   )

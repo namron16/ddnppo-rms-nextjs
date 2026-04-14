@@ -18,6 +18,7 @@ export type LogActionType =
   | 'reject_request'
   | 'download_document'
   | 'forward_document'
+  | 'forward_attachment'
   | 'add_attachment'
   | 'archive_attachment'
   | 'create_journal'
@@ -119,6 +120,9 @@ export const logRejectRequest = (requesterId: string, docTitle: string, reason?:
 
 export const logForwardDocument = (docTitle: string, recipient: string) =>
   logAction('forward_document', `Forwarded "${docTitle}" to ${recipient}`)
+
+export const logForwardAttachment = (fileName: string, recipient: string) =>
+  logAction('forward_attachment', `Forwarded attachment "${fileName}" to ${recipient}`)
 
 export const logAddAttachment = (fileName: string, parentTitle: string) =>
   logAction('add_attachment', `Attached "${fileName}" to "${parentTitle}"`)

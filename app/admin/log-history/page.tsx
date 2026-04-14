@@ -37,6 +37,7 @@ const ACTION_CONFIG: Record<string, { label: string; icon: string; badgeCls: str
   approve_request:  { label: 'Approve Request',  icon: '✅', badgeCls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
   reject_request:   { label: 'Reject Request',   icon: '🚫', badgeCls: 'bg-red-100 text-red-700 border-red-200' },
   forward_document: { label: 'Forward',          icon: '➡️', badgeCls: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  forward_attachment:{ label: 'Forward File',    icon: '📎', badgeCls: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
   add_attachment:   { label: 'Add Attachment',   icon: '📎', badgeCls: 'bg-blue-100 text-blue-700 border-blue-200' },
   archive_attachment:{ label: 'Archive Attach.', icon: '🗄️', badgeCls: 'bg-slate-200 text-slate-600 border-slate-300' },
   create_journal:   { label: 'Create Journal',   icon: '📒', badgeCls: 'bg-amber-100 text-amber-700 border-amber-200' },

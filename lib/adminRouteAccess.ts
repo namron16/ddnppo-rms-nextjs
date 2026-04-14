@@ -25,6 +25,10 @@ const ADMIN_ROUTES = [
   '/admin/archive',
 ] as const
 
+const P1_ONLY_ROUTES = [
+  '/admin/inbox',
+] as const
+
 const ROLE_DEFAULT_ROUTE: Record<SessionRole, string> = {
   PD: '/admin/master',
   DPDA: '/admin/master',
@@ -52,7 +56,8 @@ export function getDefaultAdminRoute(role: SessionRole): string {
 export function getAllowedAdminRoutes(role: SessionRole): string[] {
   const docs = role === 'P2' ? [...P2_DOC_ROUTES] : [...DOC_ROUTES]
   const admin = role === 'PD' || role === 'P1' ? [...ADMIN_ROUTES] : []
-  return uniqueRoutes([...docs, ...admin])
+  const p1Only = role === 'P1' ? [...P1_ONLY_ROUTES] : []
+  return uniqueRoutes([...docs, ...admin, ...p1Only])
 }
 
 export function isAllowedAdminPath(pathname: string, role: SessionRole): boolean {

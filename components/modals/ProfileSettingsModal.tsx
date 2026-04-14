@@ -6,6 +6,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { supabase } from '@/lib/supabase'
 import type { AdminUser } from '@/lib/auth'
+import { getStoredProfilePrefs, saveStoredProfilePrefs } from '@/lib/profileStorage'
 
 interface ProfileSettingsModalProps {
   open: boolean
@@ -79,10 +80,11 @@ export function ProfileSettingsModal({
   useEffect(() => {
     if (!open) return
     setTab('profile')
-    setDisplayName(user?.name ?? '')
+    const prefs = user ? getStoredProfilePrefs(user.role) : {}
+    setDisplayName(prefs.displayName ?? user?.name ?? '')
     setEmail(`${user?.id?.toLowerCase()}@ddnppo.gov.ph`)
     setPhotoFile(null)
-    setPhotoPreview('')
+    setPhotoPreview(prefs.avatarUrl ?? '')
     setNameError('')
     setEmailError('')
     setCurrentPw('')
@@ -136,6 +138,13 @@ export function ProfileSettingsModal({
         }
         const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
         avatarUrl = urlData.publicUrl
+      }
+
+      if (user) {
+        saveStoredProfilePrefs(user.role, {
+          displayName: displayName.trim(),
+          avatarUrl,
+        })
       }
 
       onProfileUpdated?.({ displayName: displayName.trim(), avatarUrl })
@@ -334,7 +343,11 @@ export function ProfileSettingsModal({
                 {photoFile && (
                   <div className="flex items-center gap-3 px-3 py-3 bg-blue-50 border border-blue-200 rounded-xl">
                     <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-blue-200 flex-shrink-0">
-                      <img src={photoPreview} alt="preview" className="w-full h-full object-cover" />
+                      {photoPreview ? (
+                        <img src={photoPreview} alt="preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-slate-200" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-slate-700 truncate">{photoFile.name}</p>
