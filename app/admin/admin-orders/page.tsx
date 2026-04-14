@@ -18,12 +18,15 @@ import { FileText, Paperclip } from 'lucide-react'
 import {
   getSpecialOrders,
   addSpecialOrder,
+  updateSpecialOrder,
   archiveSpecialOrder,
   addArchivedDoc,
   getArchivedDocs,
 } from '@/lib/data'
 import { supabase }             from '@/lib/supabase'
 import { statusBadgeClass }     from '@/lib/utils'
+import { logViewDocument }      from '@/lib/adminLogger'
+import { useAuth } from '@/lib/auth'
 import type { SpecialOrder }    from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -165,6 +168,101 @@ function InlineFileViewerModal({
   )
 }
 
+function EditSpecialOrderModal({
+  open,
+  order,
+  onClose,
+  onSave,
+}: {
+  open: boolean
+  order: SOWithUrl | null
+  onClose: () => void
+  onSave: (updated: SOWithUrl) => Promise<void>
+}) {
+  const [form, setForm] = useState({
+    reference: '',
+    subject: '',
+    date: '',
+    status: 'ACTIVE' as 'ACTIVE' | 'ARCHIVED',
+  })
+
+  useEffect(() => {
+    if (!order || !open) return
+    setForm({
+      reference: order.reference,
+      subject: order.subject,
+      date: order.date,
+      status: order.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
+    })
+  }, [order, open])
+
+  if (!order) return null
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit Special Order" width="max-w-lg">
+      <div className="p-6 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">SO Reference</label>
+            <input
+              className="w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition"
+              value={form.reference}
+              onChange={e => setForm(prev => ({ ...prev, reference: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Date</label>
+            <input
+              type="date"
+              className="w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition"
+              value={form.date}
+              onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Subject</label>
+          <input
+            className="w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition"
+            value={form.subject}
+            onChange={e => setForm(prev => ({ ...prev, subject: e.target.value }))}
+          />
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Status</label>
+          <select
+            className="w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition"
+            value={form.status}
+              onChange={e => setForm(prev => ({ ...prev, status: e.target.value as 'ACTIVE' | 'ARCHIVED' }))}
+          >
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="ARCHIVED">ARCHIVED</option>
+          </select>
+        </div>
+
+        <div className="flex justify-end gap-2.5 pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            onClick={() => onSave({
+              ...order,
+              reference: form.reference.trim(),
+              subject: form.subject.trim(),
+              date: form.date,
+              status: form.status,
+            })}
+            disabled={!form.reference.trim() || !form.subject.trim() || !form.date}
+          >
+            💾 Save Changes
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // Breadcrumb
 // ══════════════════════════════════════════════════════════════════════════
@@ -226,6 +324,8 @@ function AttachmentsTablePanel({
   onUpload,
   uploadingId,
   onArchiveOrder,
+  canEditOrder,
+  onEditOrder,
   onViewFile,
   onArchiveAttachment,
   onRestoreAttachment,
@@ -240,6 +340,8 @@ function AttachmentsTablePanel({
   onUpload: (parentOrderId: string, parentAttId: string | null, files: FileList) => void
   uploadingId: string | null
   onArchiveOrder: () => void
+  canEditOrder: boolean
+  onEditOrder: () => void
   onViewFile: (fileUrl: string, fileName: string) => void
   onArchiveAttachment: (att: SOAttachment) => void
   onRestoreAttachment: (att: SOAttachment) => void
@@ -332,6 +434,9 @@ function AttachmentsTablePanel({
 
         {!isDrillDown && (
           <div className="flex gap-2 flex-shrink-0">
+            {canEditOrder && (
+              <Button variant="outline" size="sm" onClick={onEditOrder}>✏ Edit</Button>
+            )}
             <Button variant="danger" size="sm" onClick={onArchiveOrder}>🗄️ Archive</Button>
           </div>
         )}
@@ -695,6 +800,9 @@ function OrderListNode({
 // ══════════════════════════════════════════════════════════════════════════
 export default function AdminOrdersPage() {
   const { toast } = useToast()
+  const { user } = useAuth()
+
+  const isSuperAdmin = user?.role === 'P1'
 
   const [orders,         setOrders]         = useState<SOWithUrl[]>([])
   const [query,          setQuery]          = useState('')
@@ -712,6 +820,7 @@ export default function AdminOrdersPage() {
   const archiveAttDisc = useDisclosure<SOAttachment>()
   const newSOModal     = useModal()
   const archiveDisc    = useDisclosure<SOWithUrl>()
+  const editOrderDisc  = useDisclosure<SOWithUrl>()
 
   const currentEntry: NavEntry | null = navStack.length > 0 ? navStack[navStack.length - 1] : null
 
@@ -862,6 +971,26 @@ export default function AdminOrdersPage() {
     archiveDisc.close()
   }
 
+  async function handleSaveOrder(updatedOrder: SOWithUrl) {
+    if (!isSuperAdmin) {
+      toast.error('Only Super Admin can edit Admin Orders.')
+      return
+    }
+
+    await updateSpecialOrder(updatedOrder)
+    setOrders(prev => prev.map(order => order.id === updatedOrder.id ? updatedOrder : order))
+    if (selectedOrder?.id === updatedOrder.id) {
+      setSelectedOrder(updatedOrder)
+    }
+    setNavStack(prev => prev.map(entry => (
+      entry.kind === 'order' && entry.order.id === updatedOrder.id
+        ? { kind: 'order', order: updatedOrder }
+        : entry
+    )))
+    toast.success('Special Order updated.')
+    editOrderDisc.close()
+  }
+
   async function handleArchiveAttachment() {
     const att = archiveAttDisc.payload
     if (!att) return
@@ -930,6 +1059,11 @@ export default function AdminOrdersPage() {
       (!q || o.reference.toLowerCase().includes(q) || o.subject.toLowerCase().includes(q))
     )
   }, [orders, query, statusFilter])
+
+  function handleViewFile(fileUrl: string, fileName: string) {
+    setViewerFile({ url: fileUrl, name: fileName })
+    logViewDocument(fileName).catch(() => {})
+  }
 
   return (
     <>
@@ -1001,7 +1135,8 @@ export default function AdminOrdersPage() {
                   </div>
                 ))}
                 <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-1">
-                  <span className="text-[11px] text-slate-400">📎 = top-level attachments</span>
+                  <Paperclip className="h-3 w-3 text-slate-400" />
+                  <span className="text-[11px] text-slate-400">= top-level attachments</span>
                 </div>
               </div>
             </div>
@@ -1026,7 +1161,9 @@ export default function AdminOrdersPage() {
                   onUpload={handleUpload}
                   uploadingId={uploadingId}
                   onArchiveOrder={() => selectedOrder && archiveDisc.open(selectedOrder)}
-                  onViewFile={(url, name) => setViewerFile({ url, name })}
+                  canEditOrder={isSuperAdmin}
+                  onEditOrder={() => selectedOrder && editOrderDisc.open(selectedOrder)}
+                  onViewFile={handleViewFile}
                   onArchiveAttachment={att => archiveAttDisc.open(att)}
                   onRestoreAttachment={handleRestoreAttachment}
                   onDrillDown={handleDrillDown}
@@ -1041,6 +1178,13 @@ export default function AdminOrdersPage() {
 
       {/* Modals */}
       <AddSpecialOrderModal open={newSOModal.isOpen} onClose={newSOModal.close} onAdd={handleAdd} />
+
+      <EditSpecialOrderModal
+        open={editOrderDisc.isOpen}
+        order={editOrderDisc.payload ?? null}
+        onClose={editOrderDisc.close}
+        onSave={handleSaveOrder}
+      />
 
       {viewerFile && (
         <InlineFileViewerModal

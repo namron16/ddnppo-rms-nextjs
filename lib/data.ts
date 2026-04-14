@@ -6,6 +6,16 @@ import type {
   ActivityLog, OrgNode
 } from '@/types'
 
+export type DailyJournalStatus = 'Draft' | 'Filed' | 'Reviewed'
+
+export type DailyJournalRecord = JournalEntry & {
+  content?: string
+  summary?: string
+  status: DailyJournalStatus
+  attachments: number
+  archived?: boolean
+}
+
 /* ════════════════════════════════════════════
    USERS — kept for authentication only
 ════════════════════════════════════════════ */
@@ -25,6 +35,7 @@ export async function getMasterDocuments(): Promise<(MasterDocument & { fileUrl?
   return (data ?? []).map(d => ({
     id: d.id, title: d.title, level: d.level, type: d.type,
     date: d.date, size: d.size, tag: d.tag, fileUrl: d.file_url ?? undefined,
+    taggedAdminAccess: Array.isArray(d.tagged_admin_access) ? d.tagged_admin_access : undefined,
   }))
 }
 
@@ -32,13 +43,17 @@ export async function addMasterDocument(doc: MasterDocument & { fileUrl?: string
   const { error } = await supabase.from('master_documents').insert({
     id: doc.id, title: doc.title, level: doc.level, type: doc.type,
     date: doc.date, size: doc.size, tag: doc.tag, file_url: doc.fileUrl ?? null,
+    tagged_admin_access: doc.taggedAdminAccess && doc.taggedAdminAccess.length > 0 ? doc.taggedAdminAccess : null,
   })
   if (error) console.warn('Supabase unavailable (add master_document):', error.message)
 }
 
 export async function updateMasterDocument(doc: MasterDocument & { fileUrl?: string }): Promise<void> {
   const { error } = await supabase.from('master_documents')
-    .update({ title: doc.title, level: doc.level, type: doc.type, date: doc.date, tag: doc.tag })
+    .update({
+      title: doc.title, level: doc.level, type: doc.type, date: doc.date, tag: doc.tag,
+      tagged_admin_access: doc.taggedAdminAccess && doc.taggedAdminAccess.length > 0 ? doc.taggedAdminAccess : null,
+    })
     .eq('id', doc.id)
   if (error) console.warn('Supabase unavailable (update master_document):', error.message)
 }
@@ -78,6 +93,19 @@ export async function addSpecialOrder(so: SpecialOrder & { fileUrl?: string }): 
     file_url: so.fileUrl ?? null,
   })
   if (error) console.warn('Supabase unavailable (add special_order):', error.message)
+}
+
+export async function updateSpecialOrder(so: SpecialOrder & { fileUrl?: string }): Promise<void> {
+  const { error } = await supabase
+    .from('special_orders')
+    .update({
+      reference: so.reference,
+      subject: so.subject,
+      date: so.date,
+      status: so.status,
+    })
+    .eq('id', so.id)
+  if (error) console.warn('Supabase unavailable (update special_order):', error.message)
 }
 
 export async function updateSpecialOrderAttachment(id: string, fileUrl: string, attachments = 1): Promise<void> {
@@ -221,6 +249,84 @@ export async function archiveSpecialOrder(id: string): Promise<void> {
 }
 
 /* ════════════════════════════════════════════
+   DAILY JOURNALS
+════════════════════════════════════════════ */
+export async function getDailyJournals(): Promise<DailyJournalRecord[]> {
+  const { data, error } = await supabase
+    .from('daily_journals')
+    .select('*')
+    .eq('archived', false)
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.warn('Supabase unavailable (daily_journals):', error.message)
+    return []
+  }
+
+  return (data ?? []).map(d => ({
+    id: d.id,
+    title: d.title,
+    type: d.type,
+    author: d.author,
+    date: d.date,
+    content: d.content ?? undefined,
+    summary: d.summary ?? undefined,
+    status: d.status,
+    attachments: d.attachments ?? 0,
+    archived: d.archived ?? false,
+  }))
+}
+
+export async function addDailyJournal(entry: DailyJournalRecord): Promise<void> {
+  const { error } = await supabase
+    .from('daily_journals')
+    .insert({
+      id: entry.id,
+      title: entry.title,
+      type: entry.type,
+      author: entry.author,
+      date: entry.date,
+      content: entry.content ?? null,
+      summary: entry.summary ?? null,
+      status: entry.status,
+      attachments: entry.attachments,
+      archived: entry.archived ?? false,
+    })
+
+  if (error) console.warn('Supabase unavailable (add daily_journal):', error.message)
+}
+
+export async function updateDailyJournal(entry: DailyJournalRecord): Promise<void> {
+  const { error } = await supabase
+    .from('daily_journals')
+    .update({
+      title: entry.title,
+      type: entry.type,
+      author: entry.author,
+      date: entry.date,
+      content: entry.content ?? null,
+      summary: entry.summary ?? null,
+      status: entry.status,
+      attachments: entry.attachments,
+      archived: entry.archived ?? false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', entry.id)
+
+  if (error) console.warn('Supabase unavailable (update daily_journal):', error.message)
+}
+
+export async function archiveDailyJournal(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('daily_journals')
+    .update({ archived: true, updated_at: new Date().toISOString() })
+    .eq('id', id)
+
+  if (error) console.warn('Supabase unavailable (archive daily_journal):', error.message)
+}
+
+/* ════════════════════════════════════════════
    CONFIDENTIAL DOCUMENTS
 ════════════════════════════════════════════ */
 export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUrl?: string; passwordHash?: string; archived?: boolean })[]> {
@@ -238,14 +344,53 @@ export async function getConfidentialDocs(): Promise<(ConfidentialDoc & { fileUr
 
 export async function addConfidentialDoc(
   doc: ConfidentialDoc & { fileUrl?: string; passwordHash?: string }
-): Promise<void> {
+): Promise<boolean> {
   const { error } = await supabase.from('confidential_docs').insert({
     id: doc.id, title: doc.title, classification: doc.classification,
     date: doc.date, access: doc.access,
     file_url:      doc.fileUrl      ?? null,
     password_hash: doc.passwordHash ?? null,
   })
-  if (error) console.warn('Supabase unavailable (add confidential_doc):', error.message)
+  if (error) {
+    console.warn('Supabase unavailable (add confidential_doc):', error.message)
+    return false
+  }
+
+  return true
+}
+
+export async function updateConfidentialDoc(
+  id: string,
+  updates: {
+    title: string
+    classification: ConfidentialDoc['classification']
+    date: string
+    access: string
+    fileUrl?: string | null
+    passwordHash?: string | null
+  }
+): Promise<boolean> {
+  const payload: Record<string, unknown> = {
+    title: updates.title,
+    classification: updates.classification,
+    date: updates.date,
+    access: updates.access,
+  }
+
+  if (updates.fileUrl !== undefined) payload.file_url = updates.fileUrl
+  if (updates.passwordHash !== undefined) payload.password_hash = updates.passwordHash
+
+  const { error } = await supabase
+    .from('confidential_docs')
+    .update(payload)
+    .eq('id', id)
+
+  if (error) {
+    console.warn('Supabase unavailable (update confidential_doc):', error.message)
+    return false
+  }
+
+  return true
 }
 
 export async function deleteConfidentialDoc(id: string): Promise<void> {
@@ -254,10 +399,15 @@ export async function deleteConfidentialDoc(id: string): Promise<void> {
 }
 
 // Sets archived to true — record is kept, not deleted
-export async function archiveConfidentialDoc(id: string): Promise<void> {
+export async function archiveConfidentialDoc(id: string): Promise<boolean> {
   const { error } = await supabase
     .from('confidential_docs').update({ archived: true }).eq('id', id)
-  if (error) console.warn('Supabase unavailable (archive confidential_doc):', error.message)
+  if (error) {
+    console.warn('Supabase unavailable (archive confidential_doc):', error.message)
+    return false
+  }
+
+  return true
 }
 
 /* ════════════════════════════════════════════
@@ -291,6 +441,21 @@ export async function addLibraryItem(
     description: item.description ?? null,
   })
   if (error) console.warn('Supabase unavailable (add library_item):', error.message)
+}
+
+export async function updateLibraryItem(
+  item: LibraryItem & { fileUrl?: string; description?: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from('library_items')
+    .update({
+      title: item.title,
+      category: item.category,
+      date_added: item.dateAdded,
+      description: item.description ?? null,
+    })
+    .eq('id', item.id)
+  if (error) console.warn('Supabase unavailable (update library_item):', error.message)
 }
 
 export async function deleteLibraryItem(id: string): Promise<void> {
@@ -341,12 +506,17 @@ export async function getArchivedDocs() {
 
 export async function addArchivedDoc(item: {
   id: string; title: string; type: string; archivedDate: string; archivedBy: string
-}): Promise<void> {
+}): Promise<boolean> {
   const { error } = await supabase.from('archived_docs').insert({
     id: item.id, title: item.title, type: item.type,
     archived_date: item.archivedDate, archived_by: item.archivedBy,
   })
-  if (error) console.warn('Supabase unavailable (add archived_doc):', error.message)
+  if (error) {
+    console.warn('Supabase unavailable (add archived_doc):', error.message)
+    return false
+  }
+
+  return true
 }
 
 export async function deleteArchivedDoc(id: string): Promise<void> {

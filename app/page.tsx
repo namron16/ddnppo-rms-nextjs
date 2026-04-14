@@ -1,6 +1,6 @@
 'use client'
 // app/page.tsx
-// Root: redirect to /login (or /dashboard if authenticated)
+// Root: redirect to /login or /admin/master when authenticated.
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -13,10 +13,8 @@ export default function RootPage() {
   useEffect(() => {
     if (!user) {
       router.replace('/login')
-    } else if (user.role === 'admin') {
-      router.replace('/admin/master')
     } else {
-      router.replace('/dashboard')
+      router.replace('/admin/master')
     }
   }, [user, router])
 

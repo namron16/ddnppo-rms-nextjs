@@ -37,7 +37,9 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center gap-1.5 font-semibold font-sans cursor-pointer transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed',
+        'inline-flex items-center gap-1.5 font-semibold font-sans cursor-pointer whitespace-nowrap',
+        'transition-all duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] active:scale-[0.985]',
+        'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
         variantClasses[variant],
         sizeClasses[size],
         className

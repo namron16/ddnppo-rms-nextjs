@@ -139,6 +139,7 @@ export const AddUserSchema = z.object({
     .endsWith('@ddnppo.gov.ph', 'Email must use the @ddnppo.gov.ph domain.'),
   role: z.enum(['officer', 'admin']),
   rank: z.string().max(50, 'Rank must be 50 characters or less.').optional(),
+  department: z.string().max(100, 'Department must be 100 characters or less.').optional(),
 })
 export type AddUserInput = z.infer<typeof AddUserSchema>
 

@@ -12,15 +12,19 @@ import { ToolbarSelect }         from '@/components/ui/Toolbar'
 import { Modal }                 from '@/components/ui/Modal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
 import { useToast }              from '@/components/ui/Toast'
+import { Paperclip } from 'lucide-react'
+import { logViewDocument }       from '@/lib/adminLogger'
 import {
   getLibraryItems,
   addLibraryItem,
+  updateLibraryItem,
   addArchivedDoc,
   archiveLibraryItem,
   getArchivedDocs,
 } from '@/lib/data'
 import { supabase }              from '@/lib/supabase'
 import { libraryBadgeClass }     from '@/lib/utils'
+import { useAuth } from '@/lib/auth'
 import type { LibraryItem, LibraryCategory } from '@/types'
 
 type LibraryItemWithUrl = LibraryItem & { fileUrl?: string; description?: string }
@@ -295,15 +299,118 @@ function ViewItemModal({
   )
 }
 
+function EditLibraryItemModal({
+  item,
+  open,
+  onClose,
+  onSave,
+}: {
+  item: LibraryItemWithUrl | null
+  open: boolean
+  onClose: () => void
+  onSave: (updated: LibraryItemWithUrl) => Promise<void>
+}) {
+  const [form, setForm] = useState({
+    title: '',
+    category: 'MANUAL' as LibraryCategory,
+    description: '',
+    dateAdded: '',
+  })
+
+  useEffect(() => {
+    if (!item || !open) return
+    setForm({
+      title: item.title,
+      category: item.category,
+      description: item.description ?? '',
+      dateAdded: item.dateAdded,
+    })
+  }, [item, open])
+
+  if (!item) return null
+
+  const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit Library Item" width="max-w-lg">
+      <div className="p-6 space-y-4">
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Title</label>
+          <input
+            className={cls}
+            value={form.title}
+            onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Category</label>
+            <select
+              className={cls}
+              value={form.category}
+              onChange={e => setForm(prev => ({ ...prev, category: e.target.value as LibraryCategory }))}
+            >
+              <option value="MANUAL">Manual</option>
+              <option value="GUIDELINE">Guideline</option>
+              <option value="TEMPLATE">Template</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Date Added</label>
+            <input
+              type="date"
+              className={cls}
+              value={form.dateAdded}
+              onChange={e => setForm(prev => ({ ...prev, dateAdded: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Description</label>
+          <textarea
+            rows={3}
+            className={`${cls} resize-none`}
+            value={form.description}
+            onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
+          />
+        </div>
+
+        <div className="flex justify-end gap-2.5 pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            onClick={() => onSave({
+              ...item,
+              title: form.title.trim(),
+              category: form.category,
+              description: form.description.trim() || undefined,
+              dateAdded: form.dateAdded,
+            })}
+            disabled={!form.title.trim() || !form.dateAdded}
+          >
+            💾 Save Changes
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ── Main Page ─────────────────────────────────
 export default function LibraryPage() {
   const { toast }  = useToast()
+  const { user } = useAuth()
   const [items, setItems]     = useState<LibraryItemWithUrl[]>([])
   const [loading, setLoading] = useState(true)
   const [catFilter, setCat]   = useState<LibraryCategory | 'ALL'>('ALL')
 
+  const isSuperAdmin = user?.role === 'P1'
+
   const newModal    = useModal()
   const viewDisc    = useDisclosure<LibraryItemWithUrl>()
+  const editDisc    = useDisclosure<LibraryItemWithUrl>()
   const archiveDisc = useDisclosure<LibraryItemWithUrl>()
 
   const { query, setQuery, filtered: searched } = useSearch(
@@ -349,6 +456,21 @@ export default function LibraryPage() {
     setItems(prev => prev.filter(i => i.id !== item.id))
     toast.success(`"${item.title}" has been archived.`)
     archiveDisc.close()
+  }
+
+  async function handleSave(updated: LibraryItemWithUrl) {
+    if (!isSuperAdmin) {
+      toast.error('Only Super Admin can edit e-Library items.')
+      return
+    }
+
+    await updateLibraryItem(updated)
+    setItems(prev => prev.map(item => item.id === updated.id ? updated : item))
+    if (viewDisc.payload?.id === updated.id) {
+      viewDisc.open(updated)
+    }
+    toast.success('Library item updated.')
+    editDisc.close()
   }
 
   const categoryStats = {
@@ -460,7 +582,19 @@ export default function LibraryPage() {
                       <td className="px-4 py-3.5 text-sm text-slate-500">{item.dateAdded}</td>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => viewDisc.open(item)}>👁</Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              viewDisc.open(item)
+                              logViewDocument(item.title).catch(() => {})
+                            }}
+                          >
+                            👁
+                          </Button>
+                          {isSuperAdmin && (
+                            <Button variant="ghost" size="sm" onClick={() => editDisc.open(item)}>✏️</Button>
+                          )}
                           {item.fileUrl && (
                             <a href={item.fileUrl} download target="_blank" rel="noopener noreferrer">
                               <Button variant="ghost" size="sm">⬇</Button>
@@ -488,6 +622,13 @@ export default function LibraryPage() {
         item={viewDisc.payload ?? null}
         open={viewDisc.isOpen}
         onClose={viewDisc.close}
+      />
+
+      <EditLibraryItemModal
+        item={editDisc.payload ?? null}
+        open={editDisc.isOpen}
+        onClose={editDisc.close}
+        onSave={handleSave}
       />
 
       <ConfirmDialog
