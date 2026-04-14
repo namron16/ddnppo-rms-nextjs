@@ -8,6 +8,7 @@ import React, {
 } from 'react'
 import { setAdminActive, setAdminInactive } from './accessRequests'
 import { logLogin, logLogout, setCurrentLogger } from './adminLogger'
+import { getStoredProfilePrefs } from './profileStorage'
 
 // ── Role Definitions ──────────────────────────
 export type AdminRole =
@@ -25,6 +26,7 @@ export interface AdminUser {
   level: RoleLevel
   initials: string
   avatarColor: string
+  avatarUrl?: string
   permissions: {
     canUpload: boolean
     canApproveReview: boolean
@@ -113,12 +115,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null)
   const [isLoading, setLoading] = useState(true)
 
+  function applyStoredProfilePrefs(account: AdminUser): AdminUser {
+    const prefs = getStoredProfilePrefs(account.role)
+    return {
+      ...account,
+      name: prefs.displayName ?? account.name,
+      avatarUrl: prefs.avatarUrl ?? account.avatarUrl,
+    }
+  }
+
   useEffect(() => {
     const roleId = getCookie('rms_session')
     if (roleId) {
       const found = ADMIN_ACCOUNTS.find(a => a.id === roleId)
       if (found) {
-        setUser(found)
+        setUser(applyStoredProfilePrefs(found))
         setCurrentLogger(found.id)
         setAdminActive(found.id).catch(() => {})
       } else {
@@ -145,7 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!account) return false
     const expected = PASSWORDS[account.role]
     if (password !== expected) return false
-    setUser(account)
+    setUser(applyStoredProfilePrefs(account))
     setCookie('rms_session', account.id)
     setCookie('rms_role', account.role)
     setCurrentLogger(account.id)
