@@ -120,7 +120,7 @@ export function Sidebar() {
 
   // Effective display values (local overrides > auth context)
   const displayName = localDisplayName ?? user?.name ?? user?.role ?? ''
-  const avatarUrl   = localAvatarUrl   ?? null
+  const avatarUrl   = localAvatarUrl   ?? user?.avatarUrl ?? null
   const initials    = displayName
     .split(' ')
     .filter(Boolean)

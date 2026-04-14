@@ -123,7 +123,7 @@ export function ProfileSettingsModal({
 
     setSaving(true)
     try {
-      let avatarUrl: string | undefined
+      let avatarUrl: string | undefined = photoPreview || undefined
 
       if (photoFile && user) {
         const fileName = `avatars/${user.id}-${Date.now()}-${photoFile.name.replace(/\s+/g, '_')}`
