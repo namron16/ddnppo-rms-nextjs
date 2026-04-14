@@ -52,7 +52,7 @@ export function getDefaultAdminRoute(role: SessionRole): string {
 export function getAllowedAdminRoutes(role: SessionRole): string[] {
   const docs = role === 'P2' ? [...P2_DOC_ROUTES] : [...DOC_ROUTES]
   const admin = role === 'PD' || role === 'P1' ? [...ADMIN_ROUTES] : []
-  return uniqueRoutes(docs.concat(admin))
+  return uniqueRoutes([...docs, ...admin])
 }
 
 export function isAllowedAdminPath(pathname: string, role: SessionRole): boolean {
