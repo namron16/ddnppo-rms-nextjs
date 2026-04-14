@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth'
-import { getStoredProfilePrefs, saveStoredProfilePrefs } from '@/lib/profileStorage'
 import { cn } from '@/lib/utils'
 import LogoutConfirmModal from '@/components/modals/LogoutConfirmModal'
 import { ProfileSettingsModal } from '@/components/modals/ProfileSettingsModal'
@@ -77,13 +76,6 @@ export function Sidebar() {
   const [localDisplayName, setLocalDisplayName] = useState<string | null>(null)
   const [localAvatarUrl,   setLocalAvatarUrl]   = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!user) return
-    const prefs = getStoredProfilePrefs(user.role)
-    setLocalDisplayName(prefs.displayName ?? null)
-    setLocalAvatarUrl(prefs.avatarUrl ?? null)
-  }, [user])
-
   // Reset local overrides when user changes (e.g. logout/login)
   useEffect(() => {
     setLocalDisplayName(null)
@@ -106,12 +98,6 @@ export function Sidebar() {
   function handleProfileUpdated({ displayName, avatarUrl }: { displayName?: string; avatarUrl?: string }) {
     if (displayName) setLocalDisplayName(displayName)
     if (avatarUrl)   setLocalAvatarUrl(avatarUrl)
-    if (user) {
-      saveStoredProfilePrefs(user.role, {
-        displayName: displayName ?? localDisplayName ?? user.name,
-        avatarUrl: avatarUrl ?? localAvatarUrl ?? undefined,
-      })
-    }
   }
 
   const canSeeAdmin = user && ['PD', 'P1'].includes(user.role)

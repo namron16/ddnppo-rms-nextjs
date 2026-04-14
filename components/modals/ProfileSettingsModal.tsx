@@ -80,11 +80,13 @@ export function ProfileSettingsModal({
   useEffect(() => {
     if (!open) return
     setTab('profile')
-    const prefs = user ? getStoredProfilePrefs(user.role) : {}
-    setDisplayName(prefs.displayName ?? user?.name ?? '')
+    void (async () => {
+      const prefs = user ? await getStoredProfilePrefs(user.role) : {}
+      setDisplayName(prefs.displayName ?? user?.name ?? '')
+      setPhotoPreview(prefs.avatarUrl ?? user?.avatarUrl ?? '')
+    })()
     setEmail(`${user?.id?.toLowerCase()}@ddnppo.gov.ph`)
     setPhotoFile(null)
-    setPhotoPreview(prefs.avatarUrl ?? '')
     setNameError('')
     setEmailError('')
     setCurrentPw('')
@@ -141,7 +143,7 @@ export function ProfileSettingsModal({
       }
 
       if (user) {
-        saveStoredProfilePrefs(user.role, {
+        await saveStoredProfilePrefs(user.role, {
           displayName: displayName.trim(),
           avatarUrl,
         })

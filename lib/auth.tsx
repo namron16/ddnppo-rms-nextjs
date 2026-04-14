@@ -9,6 +9,7 @@ import React, {
 import { setAdminActive, setAdminInactive } from './accessRequests'
 import { logLogin, logLogout, setCurrentLogger } from './adminLogger'
 import { getStoredProfilePrefs } from './profileStorage'
+import { subscribeToProfilePrefs } from './profileStorage'
 
 // ── Role Definitions ──────────────────────────
 export type AdminRole =
@@ -115,8 +116,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null)
   const [isLoading, setLoading] = useState(true)
 
-  function applyStoredProfilePrefs(account: AdminUser): AdminUser {
-    const prefs = getStoredProfilePrefs(account.role)
+  async function applyStoredProfilePrefs(account: AdminUser): Promise<AdminUser> {
+    const prefs = await getStoredProfilePrefs(account.role)
     return {
       ...account,
       name: prefs.displayName ?? account.name,
@@ -125,11 +126,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    let active = true
     const roleId = getCookie('rms_session')
     if (roleId) {
       const found = ADMIN_ACCOUNTS.find(a => a.id === roleId)
       if (found) {
-        setUser(applyStoredProfilePrefs(found))
+        void applyStoredProfilePrefs(found).then(nextUser => {
+          if (!active) return
+          setUser(nextUser)
+        })
         setCurrentLogger(found.id)
         setAdminActive(found.id).catch(() => {})
       } else {
@@ -138,7 +143,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     setLoading(false)
+
+    return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+
+    return subscribeToProfilePrefs(user.role, prefs => {
+      setUser(prev => {
+        if (!prev || prev.role !== user.role) return prev
+        return {
+          ...prev,
+          name: prefs.displayName ?? prev.name,
+          avatarUrl: prefs.avatarUrl ?? prev.avatarUrl,
+        }
+      })
+    })
+  }, [user?.role])
 
   // Mark inactive when tab/window closes. Do not log logout here because
   // browser refresh also triggers unload and would create false logout logs.
@@ -156,7 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!account) return false
     const expected = PASSWORDS[account.role]
     if (password !== expected) return false
-    setUser(applyStoredProfilePrefs(account))
+    void applyStoredProfilePrefs(account).then(setUser)
     setCookie('rms_session', account.id)
     setCookie('rms_role', account.role)
     setCurrentLogger(account.id)
