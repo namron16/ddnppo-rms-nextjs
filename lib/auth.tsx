@@ -129,16 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false)
   }, [])
 
-  // Mark inactive when tab/window closes. Do not log logout here because
-  // browser refresh also triggers unload and would create false logout logs.
-  useEffect(() => {
-    if (!user) return
-    const handleUnload = () => {
-      setAdminInactive(user.id).catch(() => {})
-    }
-    window.addEventListener('beforeunload', handleUnload)
-    return () => window.removeEventListener('beforeunload', handleUnload)
-  }, [user])
+  // Keep session/presence stable across refreshes.
+  // We only mark inactive during explicit logout to avoid false logout history.
 
   const login = useCallback((roleId: string, password: string): boolean => {
     const account = ADMIN_ACCOUNTS.find(a => a.id === roleId.toUpperCase())
