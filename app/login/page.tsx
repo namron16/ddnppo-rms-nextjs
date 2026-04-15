@@ -2,6 +2,7 @@
 // app/login/page.tsx — Admin-Only Login (No public registration)
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useAuth, ADMIN_ACCOUNTS } from '@/lib/auth'
 
@@ -16,7 +17,6 @@ export default function LoginPage() {
 
   const [roleId, setRoleId]     = useState('')
   const [password, setPassword] = useState('')
-  const [showPw, setShowPw]     = useState(false)
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
 
@@ -38,140 +38,186 @@ export default function LoginPage() {
     router.push('/admin/master')
   }
 
-  const cls = `w-full px-4 py-3 border-[1.5px] rounded-xl text-sm bg-slate-50 focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-100 transition ${
-    error ? 'border-red-300 focus:border-red-400' : 'border-slate-200 focus:border-blue-500'
-  }`
+  // Common input styling matching the design
+  const inputBaseClass = `w-full px-4 py-3 border rounded-lg text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#1b365d]/50 transition`
+  const inputClass = error 
+    ? `${inputBaseClass} border-red-300` 
+    : `${inputBaseClass} border-slate-300`
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex font-sans">
 
-      {/* ── Left: Branding ── */}
-      <div className="flex-1 login-gradient px-12 pt-10 pb-12 relative overflow-hidden flex flex-col">
-        <div className="absolute -top-16 -right-16 w-72 h-72 rounded-full border-[50px] border-white/[0.05]" />
-        <div className="relative z-10 flex-1 flex flex-col justify-center">
-          <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 mb-9 self-start">
-            <div className="w-2 h-2 bg-yellow-400 rounded-full" />
-            <span className="text-white text-xs font-semibold tracking-wide">Police Regional Office II — Davao Norte PPO</span>
-          </div>
-          <h1 className="font-display text-5xl text-white leading-tight mb-4">
-            Records Management<br />System
-          </h1>
-          <p className="text-white/60 text-[15px] leading-relaxed mb-12 max-w-sm">
-            Secure, centralized document management for DNPPO authorized administrators only.
-          </p>
+      {/* ── Left: Branding & Background ── */}
+      <div 
+        className="flex-1 relative overflow-hidden flex flex-col justify-center px-16 bg-cover bg-center"
+        style={{ backgroundColor: '#2e4769' }}
+      >
+        <Image
+          src="/assets/pnp-bg.jpg"
+          alt=""
+          fill
+          priority
+          sizes="(max-width: 1024px) 100vw, 50vw"
+          className="object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-[#2e4769]/75 mix-blend-overlay" />
 
-          {/* Role hierarchy display */}
-          <div className="space-y-2 max-w-xs">
-            <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-3">Admin Roles</p>
-            {[
-              { role: 'PD', desc: 'Provincial Director — Final Approver', color: '#dc2626' },
-              { role: 'DPDA/DPDO', desc: 'Deputy Directors — Reviewers', color: '#d97706' },
-              { role: 'P1', desc: 'Records Officer — Uploader', color: '#7c3aed' },
-              { role: 'P2–P10', desc: 'Admin Officers — Viewers', color: '#0891b2' },
-            ].map(r => (
-              <div key={r.role} className="flex items-center gap-2.5">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: r.color }} />
-                <span className="text-white/50 text-xs">
-                  <span className="text-white/80 font-semibold">{r.role}</span> — {r.desc}
-                </span>
-              </div>
-            ))}
-          </div>
+        {/* DNPPO Top-Left Badge */}
+        <div className="absolute top-10 left-10 inline-flex items-center gap-3 border-[3px] border-[#fde047] rounded-full pl-2 pr-6 py-1.5 bg-[#1b365d]/80 backdrop-blur-sm shadow-xl">
+          {/* Replace with your actual DNPPO logo */}
+          <Image
+            src="/assets/dnppo-logo.png"
+            alt="DNPPO Logo"
+            width={48}
+            height={48}
+            priority
+            sizes="48px"
+            className="w-12 h-12 rounded-full bg-white object-contain"
+          />
+          <span className="text-[#fde047] font-serif text-lg leading-tight font-medium tracking-wide">
+            Davao Norte Police Provincial<br />Office
+          </span>
         </div>
 
-        {/* Shield icon bottom */}
-        <div className="flex items-center gap-2 mt-8 self-start">
-          <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center">🛡️</div>
-          <span className="text-white/40 text-xs">Authorized Personnel Only</span>
+        {/* Main Headings */}
+        <div
+          className="relative z-10 max-w-2xl mt-12"
+          style={{ textShadow: '0 4px 16px rgba(0, 0, 0, 0.45)' }}
+        >
+          <h1 className="font-serif text-[4rem] text-[#fde047] leading-[1.1] mb-6 drop-shadow-lg font-bold">
+            Records Management<br />System
+          </h1>
+          <p className="text-[#fde047] text-lg leading-snug max-w-lg drop-shadow-md font-medium">
+            Secure, centralized document management for Davao Norte Provincial Police Office personnel
+          </p>
+        </div>
+
+        {/* Faded Large PNP Logo Overlay */}
+        <div className="absolute bottom-10 right-10 transform opacity-30 pointer-events-none ">
+          {/* Replace with your actual PNP logo */}
+          <Image
+            src="/assets/pnp-logo.png"
+            alt="PNP Background"
+            width={300}
+            height={300}
+            sizes="300px"
+            className="w-[300px] h-auto drop-shadow-2xl"
+          />
         </div>
       </div>
 
       {/* ── Right: Login Form ── */}
-      <div className="w-[460px] bg-white px-14 flex flex-col justify-center">
-        <div className="mb-8">
-          <h2 className="font-display text-3xl text-slate-800 mb-1">Admin Sign In</h2>
-          <p className="text-slate-500 text-sm">Access restricted to authorized DDNPPO administrators.</p>
-        </div>
-
-        <form onSubmit={handleSubmit} noValidate className="space-y-5">
-
-          {/* Role selector */}
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">
-              Your Role <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={roleId}
-              onChange={e => { setRoleId(e.target.value); setError('') }}
-              className={cls}
-              disabled={loading}
-            >
-              <option value="">Select your admin role…</option>
-              {ROLE_OPTIONS.map(r => (
-                <option key={r.id} value={r.id}>{r.label}</option>
-              ))}
-            </select>
+      <div className="w-[500px] bg-white px-12 py-10 flex flex-col relative shadow-2xl z-20">
+        
+        <div className="flex-1 flex flex-col justify-center items-center w-full">
+          {/* Top Centered Logo */}
+          <Image
+            src="/assets/police-regional-logo.png"
+            alt="PNP Logo"
+            width={64}
+            height={64}
+            priority
+            sizes="64px"
+            className="w-16 h-16 mb-4 object-contain"
+          />
+          
+          <div className="text-center mb-10 w-full">
+            <h2 className="font-serif text-[2.5rem] text-[#1b365d] font-bold mb-2 flex items-center justify-center gap-3">
+              <span className="text-[#fde047] text-2xl">⭐</span>
+              Sign In
+              <span className="text-[#fde047] text-2xl">⭐</span>
+            </h2>
+            <p className="text-slate-800 text-sm font-medium">
+              Access restricted to authorized DNPPO personnel
+            </p>
           </div>
 
-          {/* Password */}
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-2">
-              Password <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
+          <form onSubmit={handleSubmit} noValidate className="w-full space-y-6">
+
+            {/* Role selector */}
+            <div className="w-full">
+              <label className="block text-[#1b365d] font-bold text-base mb-2">
+                Role
+              </label>
+              <select
+                value={roleId}
+                onChange={e => { setRoleId(e.target.value); setError('') }}
+                className={inputClass}
+                disabled={loading}
+              >
+                <option value="" disabled>select your admin role</option>
+                {ROLE_OPTIONS.map(r => (
+                  <option key={r.id} value={r.id}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Password */}
+            <div className="w-full">
+              <label className="block text-[#1b365d] font-bold text-base mb-2">
+                Password
+              </label>
               <input
-                type={showPw ? 'text' : 'password'}
+                type="password"
                 value={password}
                 onChange={e => { setPassword(e.target.value); setError('') }}
-                placeholder="Enter your password"
-                className={`${cls} pr-10`}
+                placeholder="Enter Password"
+                className={inputClass}
                 disabled={loading}
               />
-              <button
-                type="button"
-                onClick={() => setShowPw(s => !s)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-              >
-                {showPw ? '🙈' : '👁'}
-              </button>
             </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg text-center">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#1b365d] hover:bg-[#152a4a] text-[#fde047] font-semibold py-3.5 rounded-lg transition text-lg disabled:opacity-70 mt-2 shadow-md"
+            >
+              {loading ? 'Signing in...' : 'SIGN IN'}
+            </button>
+          </form>
+
+          <div className="text-center mt-8 text-[11px] text-slate-400 leading-relaxed font-medium">
+            <p>Access credentials are issued by your system administrator</p>
+            <p>No public registration available.</p>
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
-              {error}
+          {/* Dev helper — remove in production */}
+          <details className="mt-8 w-full text-center">
+            <summary className="text-[10px] text-slate-300 cursor-pointer hover:text-slate-400 outline-none">
+              Dev credentials (remove in production)
+            </summary>
+            <div className="mt-2 p-3 bg-slate-50 border border-slate-100 rounded-lg text-[10px] text-slate-500 space-y-1 text-left inline-block">
+              <p><strong>PD</strong>: pd@ddnppo2024</p>
+              <p><strong>DPDA</strong>: dpda@ddnppo2024</p>
+              <p><strong>DPDO</strong>: dpdo@ddnppo2024</p>
+              <p><strong>P1</strong>: p1@ddnppo2024</p>
+              <p><strong>P2–P10</strong>: p2@ddnppo2024 … p10@ddnppo2024</p>
             </div>
-          )}
+          </details>
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition text-[15px] disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Signing in…</>
-            ) : '🔐 Sign In'}
-          </button>
-        </form>
+        {/* STI Footer */}
+        <div className="mt-auto pt-6 flex items-center justify-center gap-3 w-full border-t border-slate-100">
+          <p className="text-[10px] text-slate-700 font-medium leading-tight text-center max-w-[250px]">
+            This Record Management System was developed in collaboration with 4th year BSIS students at STI College Tagum
+          </p>
+          {/* Replace with your actual STI logo */}
+          <Image
+            src="/assets/sti-logo.png"
+            alt="STI Logo"
+            width={96}
+            height={32}
+            sizes="96px"
+            className="h-8 w-auto object-contain"
+          />
+        </div>
 
-        <p className="text-center mt-6 text-xs text-slate-400 leading-relaxed">
-          Access credentials are issued by your system administrator.<br />
-          No public registration available.
-        </p>
-
-        {/* Dev helper — remove in production */}
-        <details className="mt-6">
-          <summary className="text-[11px] text-slate-300 cursor-pointer hover:text-slate-400">
-            Dev credentials (remove in production)
-          </summary>
-          <div className="mt-2 p-3 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 space-y-1">
-            <p><strong>PD</strong>: pd@ddnppo2024</p>
-            <p><strong>DPDA</strong>: dpda@ddnppo2024</p>
-            <p><strong>DPDO</strong>: dpdo@ddnppo2024</p>
-            <p><strong>P1</strong>: p1@ddnppo2024</p>
-            <p><strong>P2–P10</strong>: p2@ddnppo2024 … p10@ddnppo2024</p>
-          </div>
-        </details>
       </div>
     </div>
   )
