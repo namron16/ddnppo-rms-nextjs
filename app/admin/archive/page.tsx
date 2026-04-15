@@ -10,6 +10,7 @@ import { EmptyState }    from '@/components/ui/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ToolbarSelect } from '@/components/ui/Toolbar'
 import { useSearch, useDisclosure } from '@/hooks'
+import { useRealtimeArchivedDocs } from '@/hooks/useRealtimeCollections'
 import { useToast }      from '@/components/ui/Toast'
 import { getArchivedDocs, deleteArchivedDoc, restoreArchivedDoc } from '@/lib/data'
 
@@ -24,6 +25,7 @@ interface ArchivedItem {
 export default function ArchivePage() {
   const { toast }    = useToast()
   const [items, setItems]     = useState<ArchivedItem[]>([])
+  useRealtimeArchivedDocs(setItems)
   const [loading, setLoading] = useState(true)
   const [typeFilter, setType] = useState('All Types')
 

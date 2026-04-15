@@ -12,6 +12,7 @@ import { Modal }        from '@/components/ui/Modal'
 import { useToast }     from '@/components/ui/Toast'
 import { FileText, Paperclip } from 'lucide-react'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
+import { useRealtimeTable } from '@/hooks/useRealtimeTable'
 import {
   createPersonnel201,
   archiveExpiredPersonnel201Records,
@@ -1268,6 +1269,17 @@ function AddPersonnelModal({ open, onClose, onAdd }: {
 export default function PersonnelFilesPage() {
   const [personnel, setPersonnel] = useState<Personnel201[]>([])
   const [loading, setLoading]     = useState(true)
+
+  useRealtimeTable('personnel_201', {
+    channelSuffix: 'page',
+    onUpdate: row => {
+      setPersonnel(prev => prev.map(p =>
+        p.id === row.id
+          ? { ...p, name: row.name, rank: row.rank, unit: row.unit, status: row.status }
+          : p
+      ))
+    },
+  })
 
   const viewDisc = useDisclosure<Personnel201>()
   const addModal = useModal()

@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Modal }      from '@/components/ui/Modal'
 import { Button }     from '@/components/ui/Button'
 import { useToast }   from '@/components/ui/Toast'
+import { useRealtimeOrgMembers } from '@/hooks/useRealtimeCollections'
 import { supabase }   from '@/lib/supabase'
 
 // ── Types ──────────────────────────────────────
@@ -729,6 +730,7 @@ export default function OrganizationPage() {
   const { toast } = useToast()
 
   const [members,    setMembers]    = useState<OrgMember[]>([])
+  useRealtimeOrgMembers(setMembers)
   const [selected,   setSelected]   = useState<string | null>(null)
   const [editTarget, setEditTarget] = useState<OrgMember | null>(null)
   const [showModal,  setShowModal]  = useState(false)

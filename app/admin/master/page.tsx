@@ -23,6 +23,7 @@ import { useToast }         from '@/components/ui/Toast'
 import { useAuth }          from '@/lib/auth'
 import { levelBadgeClass }  from '@/lib/utils'
 import { supabase }         from '@/lib/supabase'
+import { useRealtimeMasterDocs } from './useRealtimeMasterDocs'
 import { FileText, Paperclip, Lock, ShieldCheck } from 'lucide-react'
 import {
   getMasterDocuments, addMasterDocument, updateMasterDocument,
@@ -43,6 +44,7 @@ import {
 import { roleNeedsViewRequest } from '@/lib/viewRequests'
 import type { MasterDocument, DocLevel } from '@/types'
 import type { AdminRole } from '@/lib/auth'
+
 
 type DocWithUrl = MasterDocument & { fileUrl?: string }
 type DocEnriched = DocWithUrl & {
@@ -299,6 +301,14 @@ export default function MasterPage() {
   const isReviewer  = user?.role === 'DPDA' || user?.role === 'DPDO'
   const isPD        = user?.role === 'PD'
   const isPrivileged = user ? hasFullDocumentAccess(user.role) : false
+
+  useRealtimeMasterDocs({
+    setDocuments,
+    setAttachmentsMap,
+    user,
+    isPrivileged,
+    isP1,
+  })
 
   function openForwardModal(target: ForwardTarget) {
     setForwardTarget(target)

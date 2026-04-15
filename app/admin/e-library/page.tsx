@@ -11,6 +11,7 @@ import { ConfirmDialog }         from '@/components/ui/ConfirmDialog'
 import { ToolbarSelect }         from '@/components/ui/Toolbar'
 import { Modal }                 from '@/components/ui/Modal'
 import { useSearch, useModal, useDisclosure } from '@/hooks'
+import { useRealtimeLibraryItems } from '@/hooks/useRealtimeCollections'
 import { useToast }              from '@/components/ui/Toast'
 import { Paperclip } from 'lucide-react'
 import { logViewDocument }       from '@/lib/adminLogger'
@@ -403,6 +404,7 @@ export default function LibraryPage() {
   const { toast }  = useToast()
   const { user } = useAuth()
   const [items, setItems]     = useState<LibraryItemWithUrl[]>([])
+  useRealtimeLibraryItems(setItems as any)
   const [loading, setLoading] = useState(true)
   const [catFilter, setCat]   = useState<LibraryCategory | 'ALL'>('ALL')
 

@@ -27,6 +27,7 @@ import { supabase }             from '@/lib/supabase'
 import { statusBadgeClass }     from '@/lib/utils'
 import { logViewDocument }      from '@/lib/adminLogger'
 import { useAuth } from '@/lib/auth'
+import { useRealtimeSpecialOrders } from '@/hooks/useRealtimeSpecialOrders'
 import type { SpecialOrder }    from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -812,6 +813,8 @@ export default function AdminOrdersPage() {
   const [selectedOrder,  setSelectedOrder]  = useState<SOWithUrl | null>(null)
   const [uploadingId,    setUploadingId]    = useState<string | null>(null)
   const [archivingAtt,   setArchivingAtt]   = useState(false)
+
+  useRealtimeSpecialOrders({ setOrders, setAttachmentsMap })
 
   const [navStack, setNavStack] = useState<NavEntry[]>([])
 

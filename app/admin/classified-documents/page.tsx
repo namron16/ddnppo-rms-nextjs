@@ -13,6 +13,7 @@ import { Modal } from '@/components/ui/Modal'
 import { AddConfidentialDocModal } from '@/components/modals/AddConfidentialDocModal'
 import { ForwardToP1InboxModal } from '@/components/modals/ForwardToP1InboxModal'
 import { useDisclosure, useModal } from '@/hooks'
+import { useRealtimeClassifiedDocs } from '@/hooks/useRealtimeCollections'
 import { useToast } from '@/components/ui/Toast'
 import { useAuth } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
@@ -389,6 +390,9 @@ export default function ClassifiedDocumentsPage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'private'>('all')
   const [forwardTarget, setForwardTarget] = useState<ForwardTarget | null>(null)
+
+  const isP2 = user?.role === 'P2'
+  useRealtimeClassifiedDocs({ setDocs, isP2 })
 
   const addModal = useModal()
   const detailDisc = useDisclosure<ClassifiedDocRecord>()

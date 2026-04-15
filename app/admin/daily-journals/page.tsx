@@ -12,6 +12,7 @@ import { ToolbarSelect } from '@/components/ui/Toolbar'
 import { useToast } from '@/components/ui/Toast'
 import { AddJournalEntryModal } from '@/components/modals/AddJournalEntryModal'
 import { useDisclosure, useModal, useSearch } from '@/hooks'
+import { useRealtimeDailyJournals } from '@/hooks/useRealtimeCollections'
 import { logViewDocument } from '@/lib/adminLogger'
 import type { AddJournalEntryInput } from '@/lib/validations'
 import type { JournalEntry } from '@/types'
@@ -117,6 +118,7 @@ export default function DailyJournalsPage() {
   const archiveDisc = useDisclosure<JournalRecord>()
   const [loading, setLoading] = useState(true)
   const [entries, setEntries] = useState<JournalRecord[]>([])
+  useRealtimeDailyJournals(setEntries)
   const [activeType, setActiveType] = useState<'ALL' | JournalEntry['type']>('ALL')
 
   const { query, setQuery, filtered: searched } = useSearch(entries, ['title', 'author', 'content'] as Array<keyof JournalRecord>) 
