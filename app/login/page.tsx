@@ -205,7 +205,7 @@ export default function LoginPage() {
         {/* STI Footer */}
         <div className="mt-auto pt-6 flex items-center justify-center gap-3 w-full border-t border-slate-100">
           <p className="text-[10px] text-slate-700 font-medium leading-tight text-center max-w-[250px]">
-            This Record Management System was developed in collaboration with 4th year BSIS students at STI College Tagum
+            This Record Management System was developed in collaboration with the 4th-year BSIS students, Class 2026 of STI College Tagum.
           </p>
           {/* Replace with your actual STI logo */}
           <Image
@@ -217,6 +217,10 @@ export default function LoginPage() {
             className="h-8 w-auto object-contain"
           />
         </div>
+
+          <p className="text-[10px] text-slate-700/20 font-medium  text-center my-5 translate-y-12">
+            Steven Prudente
+          </p>  
 
       </div>
     </div>
