@@ -59,6 +59,9 @@ export async function getStoredProfilePrefs(role: AdminRole): Promise<StoredProf
     .maybeSingle()
 
   if (error || !data) {
+    if (error) {
+      console.warn('[profileStorage] Failed to fetch admin_profile_prefs:', error.message)
+    }
     return getCachedProfilePrefs(role)
   }
 
@@ -81,7 +84,12 @@ export async function saveStoredProfilePrefs(role: AdminRole, prefs: StoredProfi
     .select()
     .single()
 
-  if (error || !data) return null
+  if (error || !data) {
+    if (error) {
+      console.warn('[profileStorage] Failed to save admin_profile_prefs:', error.message)
+    }
+    return null
+  }
 
   const normalized = normalizePrefs(data)
   saveCachedProfilePrefs(role, normalized)

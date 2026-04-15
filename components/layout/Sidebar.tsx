@@ -83,6 +83,14 @@ export function Sidebar() {
   }, [user?.id])
 
   useEffect(() => {
+    setLocalDisplayName(null)
+  }, [user?.name])
+
+  useEffect(() => {
+    setLocalAvatarUrl(null)
+  }, [user?.avatarUrl])
+
+  useEffect(() => {
     const allRoutes = [...DOC_NAV, ...ADMIN_NAV].map(item => item.href)
     allRoutes.forEach(href => router.prefetch(href))
   }, [router])
@@ -104,9 +112,9 @@ export function Sidebar() {
   const canSeeP2    = user?.role === 'P2'
   const isP1        = user?.role === 'P1'
 
-  // Effective display values (local overrides > auth context)
-  const displayName = localDisplayName ?? user?.name ?? user?.role ?? ''
-  const avatarUrl   = localAvatarUrl   ?? user?.avatarUrl ?? null
+  // Effective display values (auth sync > temporary local override)
+  const displayName = user?.name ?? localDisplayName ?? user?.role ?? ''
+  const avatarUrl   = user?.avatarUrl ?? localAvatarUrl ?? null
   const initials    = displayName
     .split(' ')
     .filter(Boolean)

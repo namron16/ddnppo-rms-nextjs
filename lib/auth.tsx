@@ -127,22 +127,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true
-    const roleId = getCookie('rms_session')
-    if (roleId) {
-      const found = ADMIN_ACCOUNTS.find(a => a.id === roleId)
-      if (found) {
-        void applyStoredProfilePrefs(found).then(nextUser => {
+    void (async () => {
+      const roleId = getCookie('rms_session')
+      if (roleId) {
+        const found = ADMIN_ACCOUNTS.find(a => a.id === roleId)
+        if (found) {
+          const nextUser = await applyStoredProfilePrefs(found)
           if (!active) return
           setUser(nextUser)
-        })
-        setCurrentLogger(found.id)
-        setAdminActive(found.id).catch(() => {})
-      } else {
-        deleteCookie('rms_session')
-        deleteCookie('rms_role')
+          setCurrentLogger(found.id)
+          setAdminActive(found.id).catch(() => {})
+        } else {
+          deleteCookie('rms_session')
+          deleteCookie('rms_role')
+        }
       }
-    }
-    setLoading(false)
+
+      if (active) setLoading(false)
+    })()
 
     return () => { active = false }
   }, [])
@@ -160,6 +162,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       })
     })
+  }, [user?.role])
+
+  useEffect(() => {
+    if (!user) return
+
+    const refreshFromStore = async () => {
+      const prefs = await getStoredProfilePrefs(user.role)
+      setUser(prev => {
+        if (!prev || prev.role !== user.role) return prev
+        const nextName = prefs.displayName ?? prev.name
+        const nextAvatar = prefs.avatarUrl ?? prev.avatarUrl
+        if (nextName === prev.name && nextAvatar === prev.avatarUrl) return prev
+        return {
+          ...prev,
+          name: nextName,
+          avatarUrl: nextAvatar,
+        }
+      })
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshFromStore()
+    }, 15000)
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshFromStore()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [user?.role])
 
   // Mark inactive when tab/window closes. Do not log logout here because

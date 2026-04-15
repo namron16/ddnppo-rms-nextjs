@@ -143,10 +143,15 @@ export function ProfileSettingsModal({
       }
 
       if (user) {
-        await saveStoredProfilePrefs(user.role, {
+        const saved = await saveStoredProfilePrefs(user.role, {
           displayName: displayName.trim(),
           avatarUrl,
         })
+
+        if (!saved) {
+          toast.error('Profile saved locally, but cloud sync failed. Check Supabase permissions/policies.')
+          return
+        }
       }
 
       onProfileUpdated?.({ displayName: displayName.trim(), avatarUrl })
