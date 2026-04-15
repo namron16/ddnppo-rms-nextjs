@@ -4,19 +4,20 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useToast } from '@/components/ui/Toast'
-import { supabase } from '@/lib/supabase'
 import type { AdminUser } from '@/lib/auth'
-import { getStoredProfilePrefs, saveStoredProfilePrefs } from '@/lib/profileStorage'
+import {
+  getStoredProfilePrefs,
+  saveStoredProfilePrefs,
+  uploadProfileAvatar,
+} from '@/lib/profileStorage'
 
 interface ProfileSettingsModalProps {
   open: boolean
   onClose: () => void
   user: AdminUser | null
-  /** Called after a successful save so the sidebar can refresh display data */
   onProfileUpdated?: (updates: { displayName?: string; avatarUrl?: string }) => void
 }
 
-// ── tiny helpers ──────────────────────────────
 function getInitials(name: string) {
   return name
     .split(' ')
@@ -83,6 +84,7 @@ export function ProfileSettingsModal({
     void (async () => {
       const prefs = user ? await getStoredProfilePrefs(user.role) : {}
       setDisplayName(prefs.displayName ?? user?.name ?? '')
+      // Strip cache-buster for display but keep full URL for saving
       setPhotoPreview(prefs.avatarUrl ?? user?.avatarUrl ?? '')
     })()
     setEmail(`${user?.id?.toLowerCase()}@ddnppo.gov.ph`)
@@ -109,6 +111,18 @@ export function ProfileSettingsModal({
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file.')
+      return
+    }
+    // Validate file size (max 5 MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be smaller than 5 MB.')
+      return
+    }
+
     setPhotoFile(file)
     const reader = new FileReader()
     reader.onload = ev => setPhotoPreview(ev.target?.result as string)
@@ -125,21 +139,24 @@ export function ProfileSettingsModal({
 
     setSaving(true)
     try {
-      let avatarUrl: string | undefined = photoPreview || undefined
+      let avatarUrl: string | undefined = undefined
 
       if (photoFile && user) {
-        const fileName = `avatars/${user.id}-${Date.now()}-${photoFile.name.replace(/\s+/g, '_')}`
-        const { data: storageData, error: storageError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, photoFile, { cacheControl: '3600', upsert: true })
-
-        if (storageError) {
+        // Upload to stable path in the avatars bucket
+        const uploadedUrl = await uploadProfileAvatar(user.role, photoFile)
+        if (!uploadedUrl) {
           toast.error('Photo upload failed. Please try again.')
           setSaving(false)
           return
         }
-        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
-        avatarUrl = urlData.publicUrl
+        avatarUrl = uploadedUrl
+      }
+
+      // If no new photo, keep current stored URL (without the cache buster if present)
+      if (!avatarUrl) {
+        const currentPrefs = user ? await getStoredProfilePrefs(user.role) : {}
+        // Remove any old cache buster so we store a clean base URL
+        avatarUrl = currentPrefs.avatarUrl?.split('?')[0] ?? user?.avatarUrl ?? undefined
       }
 
       if (user) {
@@ -176,7 +193,6 @@ export function ProfileSettingsModal({
     if (Object.keys(errors).length > 0) return
 
     setSaving(true)
-    // Simulate async save (replace with real auth logic)
     setTimeout(() => {
       setSaving(false)
       toast.success('Password changed successfully.')
@@ -209,7 +225,7 @@ export function ProfileSettingsModal({
         onClick={onClose}
       />
 
-      {/* Panel — anchored bottom-left near sidebar */}
+      {/* Panel — anchored below the sidebar profile card */}
       <div
         ref={modalRef}
         onClick={e => e.stopPropagation()}
@@ -250,7 +266,13 @@ export function ProfileSettingsModal({
                 >
                   <span className="text-white text-[10px] font-bold">📷</span>
                 </div>
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={handlePhotoChange}
+                />
               </div>
 
               {/* Identity */}
@@ -273,7 +295,7 @@ export function ProfileSettingsModal({
 
             {/* Photo hint */}
             <p className="text-white/30 text-[10px] mt-2.5 flex items-center gap-1">
-              <span>📷</span> Click your avatar above to change profile photo
+              <span>📷</span> Click your avatar above to change profile photo (max 5 MB)
             </p>
           </div>
 
@@ -319,7 +341,7 @@ export function ProfileSettingsModal({
 
                 {/* Email */}
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+                  <label className="block text-[11px] font-semibold uppercase tracking-widests text-slate-500 mb-1.5">
                     Email Address <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -347,7 +369,7 @@ export function ProfileSettingsModal({
                 </div>
 
                 {/* Photo upload section */}
-                {photoFile && (
+                {photoFile ? (
                   <div className="flex items-center gap-3 px-3 py-3 bg-blue-50 border border-blue-200 rounded-xl">
                     <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-blue-200 flex-shrink-0">
                       {photoPreview ? (
@@ -358,19 +380,39 @@ export function ProfileSettingsModal({
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-slate-700 truncate">{photoFile.name}</p>
-                      <p className="text-[10px] text-slate-400">{(photoFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-[10px] text-slate-400">{(photoFile.size / 1024 / 1024).toFixed(2)} MB · Will sync across devices</p>
                     </div>
                     <button
-                      onClick={() => { setPhotoFile(null); setPhotoPreview(''); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                      onClick={() => {
+                        setPhotoFile(null)
+                        // Restore the saved avatar URL
+                        void getStoredProfilePrefs(user!.role).then(p => {
+                          setPhotoPreview(p.avatarUrl ?? user?.avatarUrl ?? '')
+                        })
+                        if (fileInputRef.current) fileInputRef.current.value = ''
+                      }}
                       className="text-slate-400 hover:text-red-500 font-bold text-sm transition"
                     >✕</button>
                   </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => !saving && fileInputRef.current?.click()}
+                    disabled={saving}
+                    className="w-full flex items-center gap-3 px-4 py-3 border-2 border-dashed border-slate-200 hover:border-blue-400 hover:bg-blue-50 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed text-left"
+                  >
+                    <span className="text-2xl">📷</span>
+                    <div>
+                      <p className="text-sm font-medium text-slate-600">Change profile photo</p>
+                      <p className="text-[11px] text-slate-400">JPG, PNG, WebP — max 5 MB · Synced across all devices</p>
+                    </div>
+                  </button>
                 )}
 
                 {saving && (
                   <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                    <p className="text-sm font-medium text-blue-700">Saving…</p>
+                    <p className="text-sm font-medium text-blue-700">Saving &amp; syncing across devices…</p>
                   </div>
                 )}
 
@@ -520,7 +562,7 @@ export function ProfileSettingsModal({
             <p className="text-[10px] text-slate-400">
               Logged in as <span className="font-bold text-slate-600">{user?.role}</span>
             </p>
-            <p className="text-[10px] text-slate-300">Role changes require admin</p>
+            <p className="text-[10px] text-slate-300">Profile synced across devices</p>
           </div>
 
         </div>
