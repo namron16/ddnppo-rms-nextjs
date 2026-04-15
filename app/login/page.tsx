@@ -63,7 +63,7 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-[#2e4769]/75 mix-blend-overlay" />
 
         {/* DNPPO Top-Left Badge */}
-        <div className="absolute top-10 left-10 inline-flex items-center gap-3 border-[3px] border-[#fde047] rounded-full pl-2 pr-6 py-1.5 bg-[#1b365d]/80 backdrop-blur-sm shadow-xl">
+        <div className="inline-flex w-fit mb-6 items-center gap-3 border-[3px] border-[#fde047] rounded-full pl-2 pr-6 py-1.5 bg-[#1b365d]/80 backdrop-blur-sm shadow-xl">
           {/* Replace with your actual DNPPO logo */}
           <Image
             src="/assets/dnppo-logo.png"
@@ -81,10 +81,10 @@ export default function LoginPage() {
 
         {/* Main Headings */}
         <div
-          className="relative z-10 max-w-2xl mt-12"
-          style={{ textShadow: '0 4px 16px rgba(0, 0, 0, 0.45)' }}
+          className="relative z-10 max-w-2xl"
+          style={{ textShadow: '5px 2px 5px rgba(0, 0, 0, 0.8)' }}
         >
-          <h1 className="font-serif text-[4rem] text-[#fde047] leading-[1.1] mb-6 drop-shadow-lg font-bold">
+          <h1 className="font-serif text-[4rem] text-[#fde047] leading-[1.1] mb-6 drop-shadow-lg font-bold ">
             Records Management<br />System
           </h1>
           <p className="text-[#fde047] text-lg leading-snug max-w-lg drop-shadow-md font-medium">
@@ -93,15 +93,15 @@ export default function LoginPage() {
         </div>
 
         {/* Faded Large PNP Logo Overlay */}
-        <div className="absolute bottom-10 right-10 transform opacity-30 pointer-events-none ">
+        <div className="absolute top-10 right-10 transform pointer-events-none ">
           {/* Replace with your actual PNP logo */}
           <Image
             src="/assets/pnp-logo.png"
             alt="PNP Background"
-            width={300}
-            height={300}
+            width={250}
+            height={250}
             sizes="300px"
-            className="w-[300px] h-auto drop-shadow-2xl"
+            className="w-[150px] h-auto drop-shadow-2xl"
           />
         </div>
       </div>
@@ -209,7 +209,7 @@ export default function LoginPage() {
           </p>
           {/* Replace with your actual STI logo */}
           <Image
-            src="/assets/sti-logo.png"
+            src="/assets/sti-tagum-logo.png"
             alt="STI Logo"
             width={96}
             height={32}
