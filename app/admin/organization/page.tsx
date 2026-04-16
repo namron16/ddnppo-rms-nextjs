@@ -744,6 +744,7 @@ export default function OrganizationPage() {
   const [isPanning, setPanning] = useState(false)
   const [viewport,  setViewport] = useState({ w: 0, h: 0 })
   const panStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
+  const prevLayoutEditRef = useRef(isLayoutEdit)
   const canvasRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -799,11 +800,21 @@ export default function OrganizationPage() {
   const fitScaleY = viewport.h > 0 ? (viewport.h - 32) / canvasH : 1
   const lockedZoom = Math.min(1, fitScaleX, fitScaleY)
   const effectiveZoom = isLayoutEdit ? zoom : Math.max(0.35, lockedZoom)
-  const centeredPan = {
-    x: (viewport.w - canvasW * effectiveZoom) / 2,
-    y: (viewport.h - canvasH * effectiveZoom) / 2,
-  }
+  const getCenteredPan = (scale: number) => ({
+    x: (viewport.w - canvasW * scale) / 2,
+    y: (viewport.h - canvasH * scale) / 2,
+  })
+  const centeredPan = getCenteredPan(effectiveZoom)
   const effectivePan = isLayoutEdit ? pan : centeredPan
+
+  useEffect(() => {
+    const wasLayoutEdit = prevLayoutEditRef.current
+    prevLayoutEditRef.current = isLayoutEdit
+
+    if (isLayoutEdit && !wasLayoutEdit) {
+      setPan(getCenteredPan(zoom))
+    }
+  }, [isLayoutEdit, zoom, canvasW, canvasH, viewport.w, viewport.h])
 
   function onMouseDown(e: React.MouseEvent) {
     if (!isLayoutEdit) return
@@ -820,9 +831,30 @@ export default function OrganizationPage() {
   function onMouseUp() { setPanning(false) }
 
   function handleZoom(delta: number) {
-    setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(z + delta).toFixed(2))))
+    setZoom(currentZoom => {
+      const nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(currentZoom + delta).toFixed(2)))
+
+      if (isLayoutEdit && viewport.w > 0 && viewport.h > 0) {
+        setPan(currentPan => {
+          const centerX = viewport.w / 2
+          const centerY = viewport.h / 2
+          const anchorX = (centerX - currentPan.x) / currentZoom
+          const anchorY = (centerY - currentPan.y) / currentZoom
+
+          return {
+            x: centerX - anchorX * nextZoom,
+            y: centerY - anchorY * nextZoom,
+          }
+        })
+      }
+
+      return nextZoom
+    })
   }
-  function handleResetZoom() { setZoom(1); setPan({ x: 0, y: 0 }) }
+  function handleResetZoom() {
+    setZoom(1)
+    setPan(getCenteredPan(1))
+  }
 
   function onWheel(e: React.WheelEvent) {
     if (!isLayoutEdit) return
