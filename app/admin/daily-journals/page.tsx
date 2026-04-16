@@ -17,6 +17,7 @@ import { logViewDocument } from '@/lib/adminLogger'
 import type { AddJournalEntryInput } from '@/lib/validations'
 import type { JournalEntry } from '@/types'
 import { addArchivedDoc, addDailyJournal, archiveDailyJournal, getDailyJournals, updateDailyJournal, type DailyJournalRecord } from '@/lib/data'
+import { supabase } from '@/lib/supabase'
 
 type JournalStatus = 'Draft' | 'Filed' | 'Reviewed'
 
@@ -56,10 +57,12 @@ function ViewJournalModal({
   entry,
   open,
   onClose,
+  onViewAttachment,
 }: {
   entry: JournalRecord | null
   open: boolean
   onClose: () => void
+  onViewAttachment: (fileUrl: string, fileName: string) => void
 }) {
   if (!entry) return null
 
@@ -102,6 +105,86 @@ function ViewJournalModal({
           </div>
         </div>
 
+        {entry.fileUrl && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-1">Attachment</p>
+              <p className="text-sm font-semibold text-slate-800 break-all">Journal attachment</p>
+            </div>
+            <Button variant="outline" onClick={() => onViewAttachment(entry.fileUrl!, entry.title)}>
+              View File
+            </Button>
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function ViewJournalAttachmentModal({
+  fileUrl,
+  fileName,
+  open,
+  onClose,
+}: {
+  fileUrl: string
+  fileName: string
+  open: boolean
+  onClose: () => void
+}) {
+  const isImage = !!fileUrl.match(/\.(jpg|jpeg|png|webp|gif|bmp|avif)(\?|$)/i)
+  const isPDF = !!fileUrl.match(/\.pdf(\?|$)/i)
+  const isText = !!fileUrl.match(/\.(txt|csv|md|json|xml|html?|rtf)(\?|$)/i)
+  const isAudio = !!fileUrl.match(/\.(mp3|wav|ogg|m4a|flac)(\?|$)/i)
+  const isVideo = !!fileUrl.match(/\.(mp4|webm|mov|m4v|avi)(\?|$)/i)
+  const isOffice = !!fileUrl.match(/\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)(\?|$)/i)
+  const officeViewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Viewing: ${fileName}`} width="max-w-5xl">
+      <div className="p-6 space-y-4">
+        {isImage ? (
+          <div className="flex justify-center rounded-xl border border-slate-200 bg-white p-4">
+            <img src={fileUrl} alt={fileName} className="max-h-[75vh] max-w-full object-contain rounded-lg" />
+          </div>
+        ) : isPDF ? (
+          <iframe src={fileUrl} title={fileName} className="w-full border-0" style={{ height: '75vh', minHeight: 400 }} />
+        ) : isText ? (
+          <iframe src={fileUrl} title={fileName} className="w-full border-0" style={{ height: '75vh', minHeight: 400 }} />
+        ) : isAudio ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <audio controls className="w-full" src={fileUrl}>
+              Your browser does not support the audio element.
+            </audio>
+          </div>
+        ) : isVideo ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <video controls className="w-full max-h-[75vh] rounded-lg" src={fileUrl}>
+              Your browser does not support the video element.
+            </video>
+          </div>
+        ) : isOffice ? (
+          <div className="flex justify-center rounded-xl border border-slate-200 bg-white p-4">
+            <iframe
+              src={officeViewerUrl}
+              title={fileName}
+              className="w-full border-0 rounded-lg"
+              style={{ height: '75vh', minHeight: 400 }}
+            />
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            <p className="font-medium text-slate-800 mb-2">Preview not available for this file type.</p>
+            <a href={fileUrl} download className="text-blue-700 font-semibold hover:underline">
+              Download file
+            </a>
+          </div>
+        )}
+
         <div className="flex justify-end">
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
@@ -115,6 +198,7 @@ export default function DailyJournalsPage() {
   const addModal = useModal()
   const editDisc = useDisclosure<JournalRecord>()
   const viewDisc = useDisclosure<JournalRecord>()
+  const viewAttachmentDisc = useDisclosure<{ fileUrl: string; fileName: string }>()
   const archiveDisc = useDisclosure<JournalRecord>()
   const [loading, setLoading] = useState(true)
   const [entries, setEntries] = useState<JournalRecord[]>([])
@@ -146,6 +230,7 @@ export default function DailyJournalsPage() {
         content: entry.content ?? 'No content was provided for this entry.',
         summary: entry.summary ?? (entry.content?.slice(0, 120) || 'No summary available.'),
         status: (entry.status ?? 'Draft') as JournalStatus,
+        attachments: entry.fileUrl ? Math.max(entry.attachments ?? 0, 1) : (entry.attachments ?? 0),
       }))
 
       setEntries(normalised)
@@ -162,6 +247,17 @@ export default function DailyJournalsPage() {
   async function handleCreate(input: AddJournalEntryInput & { file: File }) {
     const now = new Date()
     const status: JournalStatus = input.type === 'MEMO' ? 'Draft' : input.type === 'REPORT' ? 'Reviewed' : 'Filed'
+    const fileName = `daily-journals/${Date.now()}-${input.file.name.replace(/\s+/g, '_')}`
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from('documents')
+      .upload(fileName, input.file, { cacheControl: '3600', upsert: false })
+
+    if (storageError || !storageData) {
+      toast.error('Failed to upload the attachment. Please try again.')
+      return
+    }
+
+    const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
 
     const nextEntry: JournalRecord = {
       id: `jrnl-${Date.now()}`,
@@ -170,8 +266,9 @@ export default function DailyJournalsPage() {
       author: input.author.trim(),
       date: input.date || now.toISOString().split('T')[0],
       content: input.content?.trim() || 'No content was provided for this entry.',
+      fileUrl: urlData.publicUrl,
       status,
-      attachments: 0,
+        attachments: 1,
       summary: input.content?.trim()
         ? input.content.trim().slice(0, 120)
         : 'Newly created entry waiting for final review.',
@@ -186,6 +283,17 @@ export default function DailyJournalsPage() {
     async function handleEdit(input: AddJournalEntryInput & { file: File }) {
       const existing = editDisc.payload
       if (!existing) return
+      const fileName = `daily-journals/${Date.now()}-${input.file.name.replace(/\s+/g, '_')}`
+      const { data: storageData, error: storageError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, input.file, { cacheControl: '3600', upsert: false })
+
+      if (storageError || !storageData) {
+        toast.error('Failed to upload the attachment. Please try again.')
+        return
+      }
+
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
 
       const updatedEntry: JournalRecord = {
         ...existing,
@@ -194,6 +302,8 @@ export default function DailyJournalsPage() {
         author: input.author.trim(),
         date: input.date,
         content: input.content?.trim() || 'No content was provided for this entry.',
+        fileUrl: urlData.publicUrl,
+        attachments: 1,
         summary: input.content?.trim()
           ? input.content.trim().slice(0, 120)
           : 'Updated journal entry.',
@@ -379,7 +489,18 @@ export default function DailyJournalsPage() {
         initialValue={editDisc.payload ?? undefined}
         onSubmit={handleEdit}
       />
-      <ViewJournalModal entry={viewDisc.payload ?? null} open={viewDisc.isOpen} onClose={viewDisc.close} />
+      <ViewJournalModal
+        entry={viewDisc.payload ?? null}
+        open={viewDisc.isOpen}
+        onClose={viewDisc.close}
+        onViewAttachment={(fileUrl, fileName) => viewAttachmentDisc.open({ fileUrl, fileName })}
+      />
+      <ViewJournalAttachmentModal
+        fileUrl={viewAttachmentDisc.payload?.fileUrl ?? ''}
+        fileName={viewAttachmentDisc.payload?.fileName ?? 'Attachment'}
+        open={viewAttachmentDisc.isOpen}
+        onClose={viewAttachmentDisc.close}
+      />
       <ConfirmDialog
         open={archiveDisc.isOpen}
         title="Archive Journal Entry"

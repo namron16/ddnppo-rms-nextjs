@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.daily_journals (
   date DATE NOT NULL,
   content TEXT,
   summary TEXT,
+  file_url TEXT,
   status TEXT NOT NULL DEFAULT 'Draft',
   attachments INTEGER NOT NULL DEFAULT 0,
   archived BOOLEAN NOT NULL DEFAULT FALSE,

@@ -24,6 +24,19 @@ const JournalEntryWithFileSchema = AddJournalEntrySchema.extend({
   }),
 })
 
+const OFFICE_FILE_PATTERN = /\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)(\?|$)/i
+const TEXT_FILE_PATTERN = /\.(txt|csv|md|json|xml|html?|rtf)(\?|$)/i
+
+function getFilePreviewKind(fileName: string, mimeType = '') {
+  if (mimeType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|avif)(\?|$)/i.test(fileName)) return 'image'
+  if (mimeType === 'application/pdf' || /\.pdf(\?|$)/i.test(fileName)) return 'pdf'
+  if (mimeType.startsWith('text/') || TEXT_FILE_PATTERN.test(fileName) || mimeType.includes('json') || mimeType.includes('xml')) return 'text'
+  if (mimeType.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac)(\?|$)/i.test(fileName)) return 'audio'
+  if (mimeType.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi)(\?|$)/i.test(fileName)) return 'video'
+  if (OFFICE_FILE_PATTERN.test(fileName)) return 'office'
+  return 'download'
+}
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -49,6 +62,23 @@ export function AddJournalEntryModal({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState<JournalFormState>(EMPTY_FORM)
   const [file, setFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [previewOpen, setPreviewOpen] = useState(false)
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl('')
+      setPreviewOpen(false)
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    setPreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [file])
 
   useEffect(() => {
     if (!open) return
@@ -74,10 +104,15 @@ export function AddJournalEntryModal({
     setErrors(prev => ({ ...prev, file: '' }))
   }
 
+  function openPreview() {
+    if (file) setPreviewOpen(true)
+  }
+
   function resetAndClose() {
     setErrors({})
     setForm(EMPTY_FORM)
     setFile(null)
+    setPreviewOpen(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     onClose()
   }
@@ -146,7 +181,7 @@ export function AddJournalEntryModal({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.md,.json,.xml,.html,.htm,.rtf,.jpg,.jpeg,.png,.webp,.gif,.bmp,.avif,.mp3,.wav,.ogg,.m4a,.flac,.mp4,.webm,.mov,.m4v,.avi"
             className="hidden"
             onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
           />
@@ -154,21 +189,31 @@ export function AddJournalEntryModal({
           {file ? (
             <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-2xl flex-shrink-0">📎</span>
+                <Paperclip size={28} className="text-blue-600 flex-shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                   <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setFile(null)
-                  if (fileInputRef.current) fileInputRef.current.value = ''
-                }}
-                className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3 flex-shrink-0"
-              >
-                ✕
-              </button>
+              <div className="ml-3 flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={openPreview}
+                  className="text-xs font-semibold text-blue-700 hover:text-blue-800 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white transition"
+                >
+                  View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFile(null)
+                    if (fileInputRef.current) fileInputRef.current.value = ''
+                  }}
+                  className="text-slate-400 hover:text-red-500 font-bold text-sm"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           ) : (
             <div
@@ -200,6 +245,57 @@ export function AddJournalEntryModal({
           <Button variant="primary" onClick={submit} disabled={hasMissingRequired}>{submitLabel}</Button>
         </div>
       </div>
+
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={file ? `Preview: ${file.name}` : 'Attachment Preview'} width="max-w-5xl">
+        <div className="p-6 space-y-4">
+          {file ? (
+            <>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-1">File</p>
+                <p className="text-sm font-semibold text-slate-800 break-words">{file.name}</p>
+                <p className="text-xs text-slate-500 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              </div>
+
+              {getFilePreviewKind(file.name, file.type) === 'image' ? (
+                <div className="flex justify-center rounded-xl border border-slate-200 bg-white p-4">
+                  <img src={previewUrl} alt={file.name} className="max-h-[70vh] max-w-full object-contain rounded-lg" />
+                </div>
+              ) : getFilePreviewKind(file.name, file.type) === 'pdf' ? (
+                <iframe src={previewUrl} title={file.name} className="h-[75vh] w-full rounded-xl border border-slate-200 bg-white" />
+              ) : getFilePreviewKind(file.name, file.type) === 'text' ? (
+                <iframe src={previewUrl} title={file.name} className="h-[75vh] w-full rounded-xl border border-slate-200 bg-white" />
+              ) : getFilePreviewKind(file.name, file.type) === 'audio' ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <audio controls className="w-full" src={previewUrl}>
+                    Your browser does not support the audio element.
+                  </audio>
+                </div>
+              ) : getFilePreviewKind(file.name, file.type) === 'video' ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <video controls className="w-full max-h-[75vh] rounded-lg" src={previewUrl}>
+                    Your browser does not support the video element.
+                  </video>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+                  <p className="font-medium text-slate-800 mb-2">Preview not available for this file type before upload.</p>
+                  <a href={previewUrl} download={file.name} className="text-blue-700 font-semibold hover:underline">
+                    Download file
+                  </a>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              No attachment selected.
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   )
 }

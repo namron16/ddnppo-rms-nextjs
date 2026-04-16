@@ -11,6 +11,7 @@ export type DailyJournalStatus = 'Draft' | 'Filed' | 'Reviewed'
 export type DailyJournalRecord = JournalEntry & {
   content?: string
   summary?: string
+  fileUrl?: string
   status: DailyJournalStatus
   attachments: number
   archived?: boolean
@@ -272,8 +273,9 @@ export async function getDailyJournals(): Promise<DailyJournalRecord[]> {
     date: d.date,
     content: d.content ?? undefined,
     summary: d.summary ?? undefined,
+    fileUrl: d.file_url ?? undefined,
     status: d.status,
-    attachments: d.attachments ?? 0,
+    attachments: d.attachments ?? (d.file_url ? 1 : 0),
     archived: d.archived ?? false,
   }))
 }
@@ -289,6 +291,7 @@ export async function addDailyJournal(entry: DailyJournalRecord): Promise<void> 
       date: entry.date,
       content: entry.content ?? null,
       summary: entry.summary ?? null,
+      file_url: entry.fileUrl ?? null,
       status: entry.status,
       attachments: entry.attachments,
       archived: entry.archived ?? false,
@@ -307,6 +310,7 @@ export async function updateDailyJournal(entry: DailyJournalRecord): Promise<voi
       date: entry.date,
       content: entry.content ?? null,
       summary: entry.summary ?? null,
+      file_url: entry.fileUrl ?? null,
       status: entry.status,
       attachments: entry.attachments,
       archived: entry.archived ?? false,
