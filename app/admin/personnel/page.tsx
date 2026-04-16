@@ -574,7 +574,7 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
                 ? 'border-red-400 bg-red-50'
                 : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
             }`}>
-            <div className="text-3xl mb-2">📎</div>
+            <Paperclip size={28} className="mx-auto mb-2 text-slate-400" />
             <p className="text-sm font-medium text-slate-600 mb-1">Click to browse</p>
             <p className="text-xs text-slate-400">PDF, DOCX, JPG — max 50 MB</p>
           </div>
