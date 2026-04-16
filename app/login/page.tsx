@@ -211,10 +211,10 @@ export default function LoginPage() {
           <Image
             src="/assets/sti-tagum-logo.png"
             alt="STI Logo"
-            width={96}
-            height={32}
-            sizes="96px"
-            className="h-8 w-auto object-contain"
+            width={35}
+            height={35}
+            sizes="35px"
+            className="h-auto w-auto object-contain"
           />
         </div>
 
