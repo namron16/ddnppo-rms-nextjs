@@ -1,7 +1,7 @@
 'use client'
 // components/modals/AddLibraryItemModal.tsx
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
@@ -11,7 +11,10 @@ interface Props { open: boolean; onClose: () => void }
 
 export function AddLibraryItemModal({ open, onClose }: Props) {
   const { toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [file, setFile] = useState<File | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [form, setForm] = useState({ title: '', category: 'MANUAL', description: '' })
 
   const field = (key: string, value: string) => {
@@ -19,7 +22,33 @@ export function AddLibraryItemModal({ open, onClose }: Props) {
     setErrors(p => ({ ...p, [key]: '' }))
   }
 
+  function handleFileChange(nextFile: File | null) {
+    if (!nextFile) return
+    setFile(nextFile)
+    setErrors(prev => ({ ...prev, file: '' }))
+  }
+
+  function resetAndClose() {
+    setForm({ title: '', category: 'MANUAL', description: '' })
+    setErrors({})
+    setFile(null)
+    setDragging(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    onClose()
+  }
+
   function submit() {
+    const nextErrors: Record<string, string> = {}
+    if (!form.title.trim()) nextErrors.title = 'Title is required.'
+    if (!form.category.trim()) nextErrors.category = 'Category is required.'
+    if (!form.description.trim()) nextErrors.description = 'Description is required.'
+    if (!file) nextErrors.file = 'Attachment is required.'
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors)
+      return
+    }
+
     const result = AddLibraryItemSchema.safeParse(form)
     if (!result.success) {
       setErrors(zodErrors(result.error))
@@ -27,9 +56,14 @@ export function AddLibraryItemModal({ open, onClose }: Props) {
     }
     setErrors({})
     toast.success(`"${result.data.title}" added to the Library.`)
-    onClose()
-    setForm({ title: '', category: 'MANUAL', description: '' })
+    resetAndClose()
   }
+
+  const hasMissingRequired =
+    !form.title.trim() ||
+    !form.category.trim() ||
+    !form.description.trim() ||
+    !file
 
   const cls = (f: string) =>
     `w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition ${
@@ -37,7 +71,7 @@ export function AddLibraryItemModal({ open, onClose }: Props) {
     }`
 
   return (
-    <Modal open={open} onClose={onClose} title="Add to Library" width="max-w-md">
+    <Modal open={open} onClose={resetAndClose} title="Add to Library" width="max-w-md">
       <div className="p-6 space-y-4">
 
         <div>
@@ -50,31 +84,83 @@ export function AddLibraryItemModal({ open, onClose }: Props) {
         </div>
 
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Category</label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+            Category <span className="text-red-500">*</span>
+          </label>
           <select className={cls('category')} value={form.category} onChange={e => field('category', e.target.value)}>
             <option value="MANUAL">MANUAL</option>
             <option value="GUIDELINE">GUIDELINE</option>
             <option value="TEMPLATE">TEMPLATE</option>
           </select>
+          {errors.category && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.category}</p>}
         </div>
 
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Description</label>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+            Description <span className="text-red-500">*</span>
+          </label>
           <textarea rows={3} className={`${cls('description')} resize-none`}
             placeholder="Brief description of this library item…"
             value={form.description} onChange={e => field('description', e.target.value)} />
           {errors.description && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.description}</p>}
         </div>
 
-        <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition">
-          <div className="text-2xl mb-1.5">📗</div>
-          <p className="text-sm font-medium text-slate-600 mb-0.5">Upload file</p>
-          <p className="text-xs text-slate-400">PDF, DOCX, XLSX — max 50 MB</p>
-        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+          className="hidden"
+          onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
+        />
+
+        {file ? (
+          <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-2xl flex-shrink-0">📗</span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
+                <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setFile(null)
+                if (fileInputRef.current) fileInputRef.current.value = ''
+              }}
+              className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3 flex-shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragging(false)
+              handleFileChange(e.dataTransfer.files?.[0] ?? null)
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
+              errors.file
+                ? 'border-red-400 bg-red-50'
+                : dragging
+                  ? 'border-blue-400 bg-blue-50'
+                  : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+            }`}
+          >
+            <div className="text-2xl mb-1.5">📗</div>
+            <p className="text-sm font-medium text-slate-600 mb-0.5">Upload file</p>
+            <p className="text-xs text-slate-400">PDF, DOCX, XLSX — max 50 MB</p>
+          </div>
+        )}
+
+        {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
 
         <div className="flex justify-end gap-2.5 pt-1">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>📚 Add to Library</Button>
+          <Button variant="outline" onClick={resetAndClose}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={hasMissingRequired}>📚 Add to Library</Button>
         </div>
       </div>
     </Modal>

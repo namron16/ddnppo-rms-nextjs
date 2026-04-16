@@ -37,6 +37,7 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
   function handleFileChange(incoming: File | null) {
     if (!incoming) return
     setFile(incoming)
+    setErrors(prev => ({ ...prev, file: '' }))
     setForm(prev => (prev.date ? prev : { ...prev, date: today }))
   }
 
@@ -56,27 +57,31 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
       setErrors(zodErrors(result.error))
       return
     }
+
+    if (!file) {
+      setErrors(prev => ({ ...prev, file: 'Attachment is required.' }))
+      return
+    }
+
     setErrors({})
     setUploading(true)
 
     try {
       let fileUrl: string | undefined
 
-      if (file) {
-        const fileName = `special-orders/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
-        const { data: storageData, error: storageError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, file, { cacheControl: '3600', upsert: false })
+      const fileName = `special-orders/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
+      const { data: storageData, error: storageError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false })
 
-        if (storageError) {
-          toast.error('File upload failed. Please try again.')
-          setUploading(false)
-          return
-        }
-
-        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
-        fileUrl = urlData.publicUrl
+      if (storageError) {
+        toast.error('File upload failed. Please try again.')
+        setUploading(false)
+        return
       }
+
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
+      fileUrl = urlData.publicUrl
 
       const newSO: SOWithUrl = {
         id:          `so-${Date.now()}`,
@@ -177,13 +182,19 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
             onDrop={e => { e.preventDefault(); setDragging(false); handleFileChange(e.dataTransfer.files?.[0] ?? null) }}
             onClick={() => !uploading && fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition select-none ${
-              dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+              errors.file
+                ? 'border-red-400 bg-red-50'
+                : dragging
+                  ? 'border-blue-400 bg-blue-50'
+                  : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
             } ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
             <div className="mb-2 flex justify-center text-blue-600"><Paperclip size={30} strokeWidth={2.1} /></div>
             <p className="text-sm font-medium text-slate-600 mb-1">Click to browse or drag &amp; drop</p>
             <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
           </div>
         )}
+
+        {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
 
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
@@ -196,7 +207,7 @@ export function AddSpecialOrderModal({ open, onClose, onAdd }: Props) {
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={uploading}>
+          <Button variant="primary" onClick={submit} disabled={uploading || !file}>
             {uploading ? 'Uploading…' : '✅ Create SO'}
           </Button>
         </div>

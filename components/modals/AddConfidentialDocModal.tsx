@@ -43,6 +43,12 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
     setErrors(p => ({ ...p, [k]: '' }))
   }
 
+  function handleSelectedFile(file: File | null) {
+    if (!file) return
+    setSelectedFile(file)
+    setErrors(prev => ({ ...prev, file: '' }))
+  }
+
   function resetAndClose() {
     setForm({ title: '', classification: 'RESTRICTED', access: 'All w/ Password', date: today, password: '', confirmPassword: '' })
     setErrors({})
@@ -59,6 +65,12 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
       setErrors(zodErrors(result.error))
       return
     }
+
+    if (!selectedFile) {
+      setErrors(prev => ({ ...prev, file: 'Attachment is required.' }))
+      return
+    }
+
     setErrors({})
     setUploading(true)
 
@@ -66,21 +78,19 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
       const passwordHash = await hashPassword(result.data.password)
       let fileUrl: string | undefined
 
-      if (selectedFile) {
-        const fileName = `confidential-${Date.now()}-${selectedFile.name.replace(/\s+/g, '_')}`
-        const { data: storageData, error: storageError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, selectedFile, { cacheControl: '3600', upsert: false })
+      const fileName = `confidential-${Date.now()}-${selectedFile.name.replace(/\s+/g, '_')}`
+      const { data: storageData, error: storageError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, selectedFile, { cacheControl: '3600', upsert: false })
 
-        if (storageError) {
-          toast.error('File upload failed. Please try again.')
-          setUploading(false)
-          return
-        }
-
-        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
-        fileUrl = urlData.publicUrl
+      if (storageError) {
+        toast.error('File upload failed. Please try again.')
+        setUploading(false)
+        return
       }
+
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
+      fileUrl = urlData.publicUrl
 
       const newDoc: ConfidentialDoc & { fileUrl?: string; passwordHash: string } = {
         id:             `cd-${Date.now()}`,
@@ -186,7 +196,7 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
         <input ref={fileInputRef} type="file"
           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
           className="hidden"
-          onChange={e => setSelectedFile(e.target.files?.[0] ?? null)} />
+          onChange={e => handleSelectedFile(e.target.files?.[0] ?? null)} />
 
         {selectedFile ? (
           <div className="flex items-center justify-between px-4 py-3 bg-red-50 border-[1.5px] border-red-200 rounded-xl">
@@ -205,16 +215,22 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
         ) : (
           <div onDragOver={e => { e.preventDefault(); setDragging(true) }}
             onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); setSelectedFile(e.dataTransfer.files?.[0] ?? null) }}
+            onDrop={e => { e.preventDefault(); setDragging(false); handleSelectedFile(e.dataTransfer.files?.[0] ?? null) }}
             onClick={() => !uploading && fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
-              dragging ? 'border-red-400 bg-red-50' : 'border-slate-200 hover:border-red-400 hover:bg-red-50'
+              errors.file
+                ? 'border-red-400 bg-red-50'
+                : dragging
+                  ? 'border-red-400 bg-red-50'
+                  : 'border-slate-200 hover:border-red-400 hover:bg-red-50'
             }`}>
             <div className="text-2xl mb-1.5">🔒</div>
             <p className="text-sm font-medium text-slate-600 mb-0.5">Attach confidential document</p>
             <p className="text-xs text-slate-400">File will be stored securely</p>
           </div>
         )}
+
+        {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
 
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
@@ -225,7 +241,7 @@ export function AddConfidentialDocModal({ open, onClose, onAdd }: Props) {
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={uploading}>
+          <Button variant="primary" onClick={submit} disabled={uploading || !selectedFile}>
             {uploading ? 'Uploading…' : '🔒 Add & Encrypt'}
           </Button>
         </div>
