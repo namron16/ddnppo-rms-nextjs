@@ -6,10 +6,9 @@ import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { Paperclip } from 'lucide-react'
-import { z } from 'zod'
 import { AddJournalEntrySchema, zodErrors, type AddJournalEntryInput } from '@/lib/validations'
 
-type JournalEntryFormInput = AddJournalEntryInput & { file: File }
+type JournalEntryFormInput = AddJournalEntryInput & { file?: File }
 type JournalFormState = {
   title: string
   type: AddJournalEntryInput['type']
@@ -17,12 +16,6 @@ type JournalFormState = {
   date: string
   content: string
 }
-
-const JournalEntryWithFileSchema = AddJournalEntrySchema.extend({
-  file: z.custom<File>(value => typeof File !== 'undefined' && value instanceof File, {
-    message: 'Attachment is required.',
-  }),
-})
 
 const OFFICE_FILE_PATTERN = /\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)(\?|$)/i
 const TEXT_FILE_PATTERN = /\.(txt|csv|md|json|xml|html?|rtf)(\?|$)/i
@@ -42,7 +35,7 @@ interface Props {
   onClose: () => void
   title?: string
   submitLabel?: string
-  initialValue?: Partial<AddJournalEntryInput> & { content?: string }
+  initialValue?: Partial<AddJournalEntryInput> & { content?: string; fileUrl?: string }
   onSubmit?: (entry: JournalEntryFormInput) => void | Promise<void>
 }
 
@@ -64,6 +57,7 @@ export function AddJournalEntryModal({
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
+  const hasExistingFile = !!initialValue?.fileUrl
 
   useEffect(() => {
     if (!file) {
@@ -118,18 +112,27 @@ export function AddJournalEntryModal({
   }
 
   async function submit() {
-    const result = JournalEntryWithFileSchema.safeParse({ ...form, file })
+    const result = AddJournalEntrySchema.safeParse(form)
     if (!result.success) {
       setErrors(zodErrors(result.error))
       return
     }
+    if (!file && !hasExistingFile) {
+      setErrors(prev => ({ ...prev, file: 'Attachment is required.' }))
+      return
+    }
     setErrors({})
-    await onSubmit?.(result.data)
-    toast.success(`Journal entry "${result.data.title}" saved.`)
-    resetAndClose()
+    try {
+      await onSubmit?.({ ...result.data, file: file ?? undefined })
+      toast.success(`Journal entry "${result.data.title}" saved.`)
+      resetAndClose()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save journal entry. Please try again.'
+      toast.error(message)
+    }
   }
 
-  const hasMissingRequired = !form.title.trim() || !form.author.trim() || !form.date.trim() || !file
+  const hasMissingRequired = !form.title.trim() || !form.author.trim() || !form.date.trim() || (!file && !hasExistingFile)
 
   const cls = (f: string) =>
     `w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition ${
@@ -214,6 +217,23 @@ export function AddJournalEntryModal({
                   ✕
                 </button>
               </div>
+            </div>
+          ) : hasExistingFile ? (
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-[1.5px] border-slate-200 rounded-xl">
+              <div className="flex items-center gap-3 min-w-0">
+                <Paperclip size={24} strokeWidth={2.1} className="flex-shrink-0 text-slate-500" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">Current attachment on record</p>
+                  <p className="text-xs text-slate-400">Select a new file only if you want to replace it.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs font-semibold text-blue-700 hover:text-blue-800 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white transition"
+              >
+                Replace
+              </button>
             </div>
           ) : (
             <div

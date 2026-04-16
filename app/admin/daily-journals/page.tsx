@@ -222,19 +222,26 @@ export default function DailyJournalsPage() {
     let isMounted = true
 
     async function loadDailyJournals() {
-      const data = await getDailyJournals()
-      if (!isMounted) return
+      try {
+        const data = await getDailyJournals()
+        if (!isMounted) return
 
-      const normalised: JournalRecord[] = data.map(entry => ({
-        ...entry,
-        content: entry.content ?? 'No content was provided for this entry.',
-        summary: entry.summary ?? (entry.content?.slice(0, 120) || 'No summary available.'),
-        status: (entry.status ?? 'Draft') as JournalStatus,
-        attachments: entry.fileUrl ? Math.max(entry.attachments ?? 0, 1) : (entry.attachments ?? 0),
-      }))
+        const normalised: JournalRecord[] = data.map(entry => ({
+          ...entry,
+          content: entry.content ?? 'No content was provided for this entry.',
+          summary: entry.summary ?? (entry.content?.slice(0, 120) || 'No summary available.'),
+          status: (entry.status ?? 'Draft') as JournalStatus,
+          attachments: entry.fileUrl ? Math.max(entry.attachments ?? 0, 1) : (entry.attachments ?? 0),
+        }))
 
-      setEntries(normalised)
-      setLoading(false)
+        setEntries(normalised)
+      } catch (error) {
+        if (!isMounted) return
+        const message = error instanceof Error ? error.message : 'Failed to load daily journals.'
+        toast.error(message)
+      } finally {
+        if (isMounted) setLoading(false)
+      }
     }
 
     loadDailyJournals()
@@ -244,7 +251,11 @@ export default function DailyJournalsPage() {
     }
   }, [])
 
-  async function handleCreate(input: AddJournalEntryInput & { file: File }) {
+  async function handleCreate(input: AddJournalEntryInput & { file?: File }) {
+    if (!input.file) {
+      throw new Error('Attachment is required.')
+    }
+
     const now = new Date()
     const status: JournalStatus = input.type === 'MEMO' ? 'Draft' : input.type === 'REPORT' ? 'Reviewed' : 'Filed'
     const fileName = `daily-journals/${Date.now()}-${input.file.name.replace(/\s+/g, '_')}`
@@ -253,8 +264,7 @@ export default function DailyJournalsPage() {
       .upload(fileName, input.file, { cacheControl: '3600', upsert: false })
 
     if (storageError || !storageData) {
-      toast.error('Failed to upload the attachment. Please try again.')
-      return
+      throw new Error('Failed to upload the attachment. Please try again.')
     }
 
     const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
@@ -280,20 +290,24 @@ export default function DailyJournalsPage() {
     viewDisc.close()
   }
 
-    async function handleEdit(input: AddJournalEntryInput & { file: File }) {
+    async function handleEdit(input: AddJournalEntryInput & { file?: File }) {
       const existing = editDisc.payload
       if (!existing) return
-      const fileName = `daily-journals/${Date.now()}-${input.file.name.replace(/\s+/g, '_')}`
-      const { data: storageData, error: storageError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, input.file, { cacheControl: '3600', upsert: false })
+      let nextFileUrl = existing.fileUrl
 
-      if (storageError || !storageData) {
-        toast.error('Failed to upload the attachment. Please try again.')
-        return
+      if (input.file) {
+        const fileName = `daily-journals/${Date.now()}-${input.file.name.replace(/\s+/g, '_')}`
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('documents')
+          .upload(fileName, input.file, { cacheControl: '3600', upsert: false })
+
+        if (storageError || !storageData) {
+          throw new Error('Failed to upload the attachment. Please try again.')
+        }
+
+        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
+        nextFileUrl = urlData.publicUrl
       }
-
-      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
 
       const updatedEntry: JournalRecord = {
         ...existing,
@@ -302,8 +316,8 @@ export default function DailyJournalsPage() {
         author: input.author.trim(),
         date: input.date,
         content: input.content?.trim() || 'No content was provided for this entry.',
-        fileUrl: urlData.publicUrl,
-        attachments: 1,
+        fileUrl: nextFileUrl,
+        attachments: nextFileUrl ? 1 : 0,
         summary: input.content?.trim()
           ? input.content.trim().slice(0, 120)
           : 'Updated journal entry.',

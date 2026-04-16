@@ -261,8 +261,7 @@ export async function getDailyJournals(): Promise<DailyJournalRecord[]> {
     .order('created_at', { ascending: false })
 
   if (error) {
-    console.warn('Supabase unavailable (daily_journals):', error.message)
-    return []
+    throw new Error(`Unable to load daily journals: ${error.message}`)
   }
 
   return (data ?? []).map(d => ({
@@ -297,7 +296,7 @@ export async function addDailyJournal(entry: DailyJournalRecord): Promise<void> 
       archived: entry.archived ?? false,
     })
 
-  if (error) console.warn('Supabase unavailable (add daily_journal):', error.message)
+  if (error) throw new Error(`Unable to save daily journal: ${error.message}`)
 }
 
 export async function updateDailyJournal(entry: DailyJournalRecord): Promise<void> {
@@ -318,7 +317,7 @@ export async function updateDailyJournal(entry: DailyJournalRecord): Promise<voi
     })
     .eq('id', entry.id)
 
-  if (error) console.warn('Supabase unavailable (update daily_journal):', error.message)
+  if (error) throw new Error(`Unable to update daily journal: ${error.message}`)
 }
 
 export async function archiveDailyJournal(id: string): Promise<void> {
@@ -327,7 +326,7 @@ export async function archiveDailyJournal(id: string): Promise<void> {
     .update({ archived: true, updated_at: new Date().toISOString() })
     .eq('id', id)
 
-  if (error) console.warn('Supabase unavailable (archive daily_journal):', error.message)
+  if (error) throw new Error(`Unable to archive daily journal: ${error.message}`)
 }
 
 /* ════════════════════════════════════════════
