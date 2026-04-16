@@ -2,7 +2,7 @@
 // app/admin/admin-orders/page.tsx
 // Aligned with Master Documents UI & logic
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { PageHeader }           from '@/components/ui/PageHeader'
 import { Badge }                from '@/components/ui/Badge'
 import { Button }               from '@/components/ui/Button'
@@ -122,15 +122,74 @@ function fileInfo(name: string) {
   return   { icon: '📄', label: 'FILE', color: 'text-slate-600',  bg: 'bg-slate-50',  border: 'border-slate-200',  badgeCls: 'bg-slate-100 text-slate-600'  }
 }
 
+function getExtensionFromUrl(fileUrl: string) {
+  const cleanUrl = fileUrl.split('?')[0].split('#')[0]
+  const match = cleanUrl.match(/\.([a-z0-9]+)$/i)
+  return match?.[1]?.toLowerCase() ?? ''
+}
+
+function getSuggestedFileName(baseName: string, fileUrl: string) {
+  if (/\.[a-z0-9]+$/i.test(baseName)) return baseName
+
+  const ext = getExtensionFromUrl(fileUrl)
+  return ext ? `${baseName}.${ext}` : baseName
+}
+
+async function saveFileFromUrl(fileUrl: string, suggestedName: string): Promise<boolean> {
+  const response = await fetch(fileUrl)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch file: ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const picker = window as Window & {
+    showSaveFilePicker?: (options?: { suggestedName?: string }) => Promise<FileSystemFileHandle>
+  }
+
+  if (picker.showSaveFilePicker) {
+    const handle = await picker.showSaveFilePicker({ suggestedName })
+    const writable = await handle.createWritable()
+    await writable.write(blob)
+    await writable.close()
+    return true
+  }
+
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = suggestedName
+  anchor.rel = 'noopener'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(objectUrl)
+  return false
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // Inline File Viewer Modal
 // ══════════════════════════════════════════════════════════════════════════
 function InlineFileViewerModal({
   fileUrl, fileName, open, onClose,
 }: { fileUrl: string; fileName: string; open: boolean; onClose: () => void }) {
+  const { toast } = useToast()
+  const [isDownloading, setIsDownloading] = useState(false)
   const isPDF   = !!fileUrl.match(/\.pdf(\?|$)/i)
   const isImage = !!fileUrl.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)
   const fi      = fileInfo(fileName)
+
+  async function handleDownload() {
+    try {
+      setIsDownloading(true)
+      const saved = await saveFileFromUrl(fileUrl, getSuggestedFileName(fileName, fileUrl))
+      toast.success(saved ? `Downloaded "${fileName}" successfully.` : `Downloaded "${fileName}" successfully.`)
+    } catch (error) {
+      console.error('download error:', error)
+      toast.error('Could not download the file.')
+    } finally {
+      setIsDownloading(false)
+    }
+  }
   return (
     <Modal open={open} onClose={onClose} title={`Viewing: ${fileName}`} width="max-w-5xl">
       <div className="flex flex-col" style={{ maxHeight: '85vh' }}>
@@ -140,9 +199,14 @@ function InlineFileViewerModal({
             <p className="text-xs font-semibold text-slate-700 truncate max-w-sm">{fileName}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-            <a href={fileUrl} download className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
-              ⬇ Download
-            </a>
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="text-[11px] font-semibold px-2.5 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isDownloading ? '⬇ Saving…' : '⬇ Download'}
+            </button>
             <Button variant="outline" size="sm" onClick={onClose}>✕ Close</Button>
           </div>
         </div>
@@ -158,9 +222,14 @@ function InlineFileViewerModal({
               <span className="text-6xl mb-4">{fi.icon}</span>
               <p className="text-sm font-semibold text-slate-700 mb-1 break-all">{fileName}</p>
               <p className="text-xs text-slate-400 mb-5 max-w-xs">Preview not available. Download to view the file.</p>
-              <a href={fileUrl} download className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition">
-                ⬇ Download to view
-              </a>
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={isDownloading}
+                className="inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isDownloading ? '⬇ Saving…' : '⬇ Download to view'}
+              </button>
             </div>
           )}
         </div>
@@ -328,6 +397,7 @@ function AttachmentsTablePanel({
   canEditOrder,
   onEditOrder,
   onViewFile,
+  onDownloadFile,
   onArchiveAttachment,
   onRestoreAttachment,
   onDrillDown,
@@ -344,6 +414,7 @@ function AttachmentsTablePanel({
   canEditOrder: boolean
   onEditOrder: () => void
   onViewFile: (fileUrl: string, fileName: string) => void
+  onDownloadFile: (fileUrl: string, fileName: string) => void
   onArchiveAttachment: (att: SOAttachment) => void
   onRestoreAttachment: (att: SOAttachment) => void
   onDrillDown: (att: SOAttachment) => void
@@ -450,10 +521,13 @@ function AttachmentsTablePanel({
             >
               👁 View File
             </button>
-            <a href={drillAtt.file_url} download target="_blank" rel="noopener noreferrer"
-              className="text-xs px-2.5 py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-semibold hover:bg-slate-200 transition">
+            <button
+              type="button"
+              onClick={() => onDownloadFile(drillAtt.file_url, drillAtt.file_name)}
+              className="text-xs px-2.5 py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg font-semibold hover:bg-slate-200 transition"
+            >
               ⬇ Download
-            </a>
+            </button>
             <button
               onClick={() => onArchiveAttachment(drillAtt)}
               className="text-xs px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-semibold hover:bg-amber-100 transition"
@@ -473,10 +547,13 @@ function AttachmentsTablePanel({
             <p className="text-xs text-blue-600 truncate">{currentOrder.reference} – {currentOrder.subject}</p>
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
-            <a href={currentOrder.fileUrl} download target="_blank" rel="noopener noreferrer"
-              className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition">
+            <button
+              type="button"
+              onClick={() => onDownloadFile(currentOrder.fileUrl!, currentOrder.reference)}
+              className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
+            >
               ⬇ Download
-            </a>
+            </button>
             <button
               onClick={() => onViewFile(currentOrder.fileUrl!, currentOrder.reference)}
               className="text-xs px-2.5 py-1 bg-white border border-blue-200 text-blue-700 rounded-md font-medium hover:bg-blue-100 transition"
@@ -700,11 +777,13 @@ function AttachmentsTablePanel({
                               >
                                 👁 View
                               </button>
-                              <a href={att.file_url} download target="_blank" rel="noopener noreferrer">
-                                <button className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition">
-                                  ⬇
-                                </button>
-                              </a>
+                              <button
+                                type="button"
+                                onClick={() => onDownloadFile(att.file_url, att.file_name)}
+                                className="text-[10px] font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition"
+                              >
+                                ⬇
+                              </button>
                               <button
                                 onClick={() => onDrillDown(att)}
                                 className="text-[10px] font-semibold px-2 py-1 bg-violet-50 text-violet-700 border border-violet-200 rounded hover:bg-violet-100 transition"
@@ -1054,6 +1133,16 @@ export default function AdminOrdersPage() {
     return true
   }
 
+  const handleDownloadFile = useCallback(async (fileUrl: string, fileName: string) => {
+    try {
+      const saved = await saveFileFromUrl(fileUrl, getSuggestedFileName(fileName, fileUrl))
+      toast.success(saved ? `Downloaded "${fileName}" successfully.` : `Downloaded "${fileName}" successfully.`)
+    } catch (error) {
+      console.error('download error:', error)
+      toast.error('Could not download the file.')
+    }
+  }, [toast])
+
   // Filtered list for left panel
   const filteredOrders = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -1167,6 +1256,7 @@ export default function AdminOrdersPage() {
                   canEditOrder={isSuperAdmin}
                   onEditOrder={() => selectedOrder && editOrderDisc.open(selectedOrder)}
                   onViewFile={handleViewFile}
+                  onDownloadFile={handleDownloadFile}
                   onArchiveAttachment={att => archiveAttDisc.open(att)}
                   onRestoreAttachment={handleRestoreAttachment}
                   onDrillDown={handleDrillDown}

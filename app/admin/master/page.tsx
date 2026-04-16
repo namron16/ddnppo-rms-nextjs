@@ -180,9 +180,7 @@ function InlineFileViewerModal({ fileUrl, fileName, open, onClose }: {
     try {
       setIsDownloading(true)
       const saved = await saveFileFromUrl(fileUrl, getSuggestedFileName(fileName, fileUrl))
-      if (saved) {
-        toast.success(`Saved "${fileName}".`)
-      }
+      toast.success(saved ? `Downloaded "${fileName}" successfully.` : `Downloaded "${fileName}" successfully.`)
     } catch (error) {
       console.error('download error:', error)
       toast.error('Could not download the file.')
@@ -392,9 +390,7 @@ export default function MasterPage() {
     try {
       setDownloadingKey(downloadKey)
       const saved = await saveFileFromUrl(fileUrl, suggestedName)
-      if (saved) {
-        toast.success(`Saved "${suggestedName}".`)
-      }
+      toast.success(saved ? `Downloaded "${suggestedName}" successfully.` : `Downloaded "${suggestedName}" successfully.`)
     } catch (error) {
       console.error('download error:', error)
       toast.error('Could not download the file.')

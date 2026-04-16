@@ -154,7 +154,7 @@ export function AddJournalEntryModal({
           {file ? (
             <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-2xl flex-shrink-0">📎</span>
+                <Paperclip size={24} strokeWidth={2.1} className="flex-shrink-0 text-slate-500" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                   <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
