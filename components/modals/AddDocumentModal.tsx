@@ -49,6 +49,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
   function handleFileChange(incoming: File | null) {
     if (!incoming) return
     setFile(incoming)
+    setErrors(prev => ({ ...prev, file: '' }))
     const ext = incoming.name.split('.').pop()?.toUpperCase() ?? ''
     if (['PDF','DOCX','DOC','XLSX','XLS'].includes(ext)) {
       const mapped = ext.startsWith('DOC') ? 'DOCX' : ext.startsWith('XLS') ? 'XLSX' : ext
@@ -79,6 +80,13 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
 
     const result = AddDocumentSchema.safeParse(form)
     if (!result.success) { setErrors(zodErrors(result.error)); return }
+
+    if (!file) {
+      setErrors(prev => ({ ...prev, file: 'Attachment is required.' }))
+      toast.error('Please attach a file before uploading.')
+      return
+    }
+
     setErrors({})
     setUploading(true)
 
@@ -86,17 +94,15 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
       let fileUrl: string | undefined
       let fileSize = '—'
 
-      if (file) {
-        const fileName = `master-docs/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
-        const { data: storageData, error: storageError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, file, { cacheControl: '3600', upsert: false })
+      const fileName = `master-docs/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
+      const { data: storageData, error: storageError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false })
 
-        if (storageError) { toast.error('File upload failed. Please try again.'); setUploading(false); return }
-        const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
-        fileUrl  = urlData.publicUrl
-        fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB'
-      }
+      if (storageError) { toast.error('File upload failed. Please try again.'); setUploading(false); return }
+      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(storageData.path)
+      fileUrl  = urlData.publicUrl
+      fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB'
 
       const newDocId = `md-${Date.now()}`
       const newDoc: DocWithUrl = {
@@ -229,13 +235,19 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
             onDrop={e => { e.preventDefault(); setDragging(false); handleFileChange(e.dataTransfer.files?.[0] ?? null) }}
             onClick={() => !uploading && fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition select-none ${
-              dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+              errors.file
+                ? 'border-red-400 bg-red-50'
+                : dragging
+                  ? 'border-blue-400 bg-blue-50'
+                  : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
             } ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
             <div className="text-3xl mb-2">📁</div>
             <p className="text-sm font-medium text-slate-600 mb-1">Click to browse or drag &amp; drop</p>
             <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
           </div>
         )}
+
+        {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
 
         {/* Upload notice */}
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-xs text-amber-800">
@@ -255,7 +267,7 @@ export function AddDocumentModal({ open, onClose, onAdd }: AddDocumentModalProps
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={uploading}>
+          <Button variant="primary" onClick={handleSubmit} disabled={uploading || !file}>
             {uploading ? 'Uploading…' : '📤 Upload & Set Visibility'}
           </Button>
         </div>

@@ -474,7 +474,12 @@ export default function MasterPage() {
       isRestricted: false,
       taggedRoles: (newDoc.taggedAdminAccess ?? []) as AdminRole[],
     }
-    setDocuments(prev => [...prev, enriched])
+    setDocuments(prev => {
+      if (prev.some(d => d.id === enriched.id)) {
+        return prev.map(d => d.id === enriched.id ? { ...d, ...enriched } : d)
+      }
+      return [...prev, enriched]
+    })
     setAttachmentsMap(prev => { const next = new Map(prev); next.set(newDoc.id, []); return next })
     setSelection(enriched)
   }
@@ -538,7 +543,13 @@ export default function MasterPage() {
       })
       if (newAtt) {
         const mapKey = parentAttId ?? parentDocId
-        setAttachmentsMap(prev => { const next = new Map(prev); next.set(mapKey, [...(next.get(mapKey) ?? []), newAtt]); return next })
+        setAttachmentsMap(prev => {
+          const next = new Map(prev)
+          const existing = next.get(mapKey) ?? []
+          if (existing.some(a => a.id === newAtt.id)) return prev
+          next.set(mapKey, [...existing, newAtt])
+          return next
+        })
         count++
       }
     }

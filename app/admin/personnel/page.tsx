@@ -508,17 +508,34 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [file, setFile]           = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [errors, setErrors]       = useState<Record<string, string>>({})
+
+  function handleFileChange(nextFile: File | null) {
+    if (!nextFile) return
+    setFile(nextFile)
+    setErrors(prev => ({ ...prev, file: '' }))
+  }
+
+  function resetAndClose() {
+    setFile(null)
+    setErrors({})
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    onClose()
+  }
 
   async function submit() {
-    if (!file || !item) { toast.error('Please select a file.'); return }
+    if (!item) return
+    if (!file) {
+      setErrors(prev => ({ ...prev, file: 'Attachment is required.' }))
+      return
+    }
     setUploading(true)
     const url = await uploadDoc201File(item.id, file, 'Admin')
     if (url) {
       const size = (file.size / 1024 / 1024).toFixed(1) + ' MB'
       toast.success(`"${item.label}" uploaded successfully.`)
       onDone(item.id, url, size)
-      setFile(null)
-      onClose()
+      resetAndClose()
     } else {
       toast.error('Upload failed. Please try again.')
     }
@@ -526,7 +543,7 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
   }
 
   return (
-    <Modal open={open} onClose={uploading ? () => {} : onClose} title="Upload Document" width="max-w-md">
+    <Modal open={open} onClose={uploading ? () => {} : resetAndClose} title="Upload Document" width="max-w-md">
       <div className="p-6 space-y-4">
         <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
           <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold mb-0.5">Document</p>
@@ -536,7 +553,7 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
         <input ref={fileInputRef} type="file"
           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
           className="hidden"
-          onChange={e => setFile(e.target.files?.[0] ?? null)} />
+          onChange={e => handleFileChange(e.target.files?.[0] ?? null)} />
         {file ? (
           <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
             <div className="flex items-center gap-3 min-w-0">
@@ -547,17 +564,22 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
               </div>
             </div>
             {!uploading && (
-              <button onClick={() => setFile(null)} className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3">✕</button>
+              <button onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }} className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3">✕</button>
             )}
           </div>
         ) : (
           <div onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition">
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition ${
+              errors.file
+                ? 'border-red-400 bg-red-50'
+                : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+            }`}>
             <div className="text-3xl mb-2">📎</div>
             <p className="text-sm font-medium text-slate-600 mb-1">Click to browse</p>
             <p className="text-xs text-slate-400">PDF, DOCX, JPG — max 50 MB</p>
           </div>
         )}
+        {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
@@ -565,8 +587,8 @@ function UploadDocModal({ item, personName, open, onClose, onDone }: {
           </div>
         )}
         <div className="flex justify-end gap-2.5 pt-1">
-          <Button variant="outline" onClick={onClose} disabled={uploading}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={uploading}>
+          <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={uploading || !file}>
             {uploading ? 'Uploading…' : '📤 Upload'}
           </Button>
         </div>

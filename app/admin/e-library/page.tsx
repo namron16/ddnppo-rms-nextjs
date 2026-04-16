@@ -45,43 +45,65 @@ function AddLibraryItemModal({
   const [file, setFile]           = useState<File | null>(null)
   const [dragging, setDragging]   = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [errors, setErrors]       = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     title:       '',
     category:    'MANUAL' as LibraryCategory,
     description: '',
   })
 
+  function field<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    setForm(prev => ({ ...prev, [key]: value }))
+    setErrors(prev => ({ ...prev, [key]: '' }))
+  }
+
+  function handleFileChange(nextFile: File | null) {
+    if (!nextFile) return
+    setFile(nextFile)
+    setErrors(prev => ({ ...prev, file: '' }))
+  }
+
   function resetAndClose() {
     setForm({ title: '', category: 'MANUAL', description: '' })
+    setErrors({})
     setFile(null)
+    setDragging(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     onClose()
   }
 
   async function submit() {
-    if (!form.title.trim()) { toast.error('Please enter a title.'); return }
+    const nextErrors: Record<string, string> = {}
+    if (!form.title.trim()) nextErrors.title = 'Title is required.'
+    if (!file) nextErrors.file = 'Attachment is required.'
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors)
+      return
+    }
+
+    if (!file) return
+    const uploadFile: File = file
+    setErrors({})
     setUploading(true)
     try {
       let fileUrl: string | undefined
       let fileSize = '—'
 
-      if (file) {
-        const fileName = `library/${Date.now()}-${file.name.replace(/\s+/g, '_')}`
-        const { data: storageData, error: storageError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, file, { cacheControl: '3600', upsert: false })
+      const fileName = `library/${Date.now()}-${uploadFile.name.replace(/\s+/g, '_')}`
+      const { data: storageData, error: storageError } = await supabase.storage
+        .from('documents')
+        .upload(fileName, uploadFile, { cacheControl: '3600', upsert: false })
 
-        if (storageError) {
-          toast.error('File upload failed. Please try again.')
-          setUploading(false)
-          return
-        }
-        const { data: urlData } = supabase.storage
-          .from('documents')
-          .getPublicUrl(storageData.path)
-        fileUrl  = urlData.publicUrl
-        fileSize = (file.size / 1024 / 1024).toFixed(1) + ' MB'
+      if (storageError) {
+        toast.error('File upload failed. Please try again.')
+        setUploading(false)
+        return
       }
+      const { data: urlData } = supabase.storage
+        .from('documents')
+        .getPublicUrl(storageData.path)
+      fileUrl  = urlData.publicUrl
+      fileSize = (uploadFile.size / 1024 / 1024).toFixed(1) + ' MB'
 
       const today   = new Date().toISOString().split('T')[0]
       const newItem: LibraryItemWithUrl = {
@@ -106,7 +128,12 @@ function AddLibraryItemModal({
     }
   }
 
-  const cls = 'w-full px-3 py-2.5 border-[1.5px] border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition'
+  const hasMissingRequired = !form.title.trim() || !file
+
+  const cls = (f: string) =>
+    `w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:bg-white transition ${
+      errors[f] ? 'border-red-400 focus:border-red-400' : 'border-slate-200 focus:border-blue-500'
+    }`
 
   return (
     <Modal open={open} onClose={uploading ? () => {} : resetAndClose} title="Add to e-Library" width="max-w-lg">
@@ -116,20 +143,21 @@ function AddLibraryItemModal({
             Title <span className="text-red-500">*</span>
           </label>
           <input
-            className={cls}
+            className={cls('title')}
             placeholder="e.g. PNP Anti-Corruption Manual 2024"
             value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            onChange={e => field('title', e.target.value)}
             disabled={uploading}
           />
+          {errors.title && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.title}</p>}
         </div>
 
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Category</label>
           <select
-            className={cls}
+            className={cls('category')}
             value={form.category}
-            onChange={e => setForm(f => ({ ...f, category: e.target.value as LibraryCategory }))}
+            onChange={e => field('category', e.target.value as LibraryCategory)}
             disabled={uploading}
           >
             <option value="MANUAL">Manual</option>
@@ -142,10 +170,10 @@ function AddLibraryItemModal({
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Description</label>
           <textarea
             rows={3}
-            className={`${cls} resize-none`}
+            className={`${cls('description')} resize-none`}
             placeholder="Brief description of this library item…"
             value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            onChange={e => field('description', e.target.value)}
             disabled={uploading}
           />
         </div>
@@ -155,7 +183,7 @@ function AddLibraryItemModal({
           type="file"
           accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
           className="hidden"
-          onChange={e => setFile(e.target.files?.[0] ?? null)}
+          onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
         />
 
         {file ? (
@@ -183,17 +211,23 @@ function AddLibraryItemModal({
           <div
             onDragOver={e  => { e.preventDefault(); setDragging(true) }}
             onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); setFile(e.dataTransfer.files?.[0] ?? null) }}
+            onDrop={e => { e.preventDefault(); setDragging(false); handleFileChange(e.dataTransfer.files?.[0] ?? null) }}
             onClick={() => !uploading && fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
-              dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+              errors.file
+                ? 'border-red-400 bg-red-50'
+                : dragging
+                  ? 'border-blue-400 bg-blue-50'
+                  : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
             }`}
           >
             <div className="text-2xl mb-1.5">📗</div>
-            <p className="text-sm font-medium text-slate-600 mb-0.5">Upload file (optional)</p>
+            <p className="text-sm font-medium text-slate-600 mb-0.5">Upload file</p>
             <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
           </div>
         )}
+
+        {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
 
         {uploading && (
           <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
@@ -204,7 +238,7 @@ function AddLibraryItemModal({
 
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="outline" onClick={resetAndClose} disabled={uploading}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={uploading}>
+          <Button variant="primary" onClick={submit} disabled={uploading || hasMissingRequired}>
             {uploading ? 'Uploading…' : '📚 Add to Library'}
           </Button>
         </div>
