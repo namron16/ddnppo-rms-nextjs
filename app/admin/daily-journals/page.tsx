@@ -159,7 +159,7 @@ export default function DailyJournalsPage() {
     }
   }, [])
 
-  async function handleCreate(input: AddJournalEntryInput) {
+  async function handleCreate(input: AddJournalEntryInput & { file: File }) {
     const now = new Date()
     const status: JournalStatus = input.type === 'MEMO' ? 'Draft' : input.type === 'REPORT' ? 'Reviewed' : 'Filed'
 
@@ -183,7 +183,7 @@ export default function DailyJournalsPage() {
     viewDisc.close()
   }
 
-    async function handleEdit(input: AddJournalEntryInput) {
+    async function handleEdit(input: AddJournalEntryInput & { file: File }) {
       const existing = editDisc.payload
       if (!existing) return
 

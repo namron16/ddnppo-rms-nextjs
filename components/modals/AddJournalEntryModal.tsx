@@ -1,11 +1,28 @@
 'use client'
 // components/modals/AddJournalEntryModal.tsx
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal }    from '@/components/ui/Modal'
 import { Button }   from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import { Paperclip } from 'lucide-react'
+import { z } from 'zod'
 import { AddJournalEntrySchema, zodErrors, type AddJournalEntryInput } from '@/lib/validations'
+
+type JournalEntryFormInput = AddJournalEntryInput & { file: File }
+type JournalFormState = {
+  title: string
+  type: AddJournalEntryInput['type']
+  author: string
+  date: string
+  content: string
+}
+
+const JournalEntryWithFileSchema = AddJournalEntrySchema.extend({
+  file: z.custom<File>(value => typeof File !== 'undefined' && value instanceof File, {
+    message: 'Attachment is required.',
+  }),
+})
 
 interface Props {
   open: boolean
@@ -13,11 +30,11 @@ interface Props {
   title?: string
   submitLabel?: string
   initialValue?: Partial<AddJournalEntryInput> & { content?: string }
-  onSubmit?: (entry: AddJournalEntryInput) => void | Promise<void>
+  onSubmit?: (entry: JournalEntryFormInput) => void | Promise<void>
 }
 
 const getTodayDate = () => new Date().toISOString().split('T')[0]
-const EMPTY_FORM = { title: '', type: 'MEMO' as const, author: '', date: '', content: '' }
+const EMPTY_FORM: JournalFormState = { title: '', type: 'MEMO', author: '', date: '', content: '' }
 
 export function AddJournalEntryModal({
   open,
@@ -28,12 +45,15 @@ export function AddJournalEntryModal({
   onSubmit,
 }: Props) {
   const { toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [form, setForm] = useState<JournalFormState>(EMPTY_FORM)
+  const [file, setFile] = useState<File | null>(null)
 
   useEffect(() => {
     if (!open) return
     setErrors({})
+    setFile(null)
     setForm({
       title: initialValue?.title ?? '',
       type: initialValue?.type ?? 'MEMO',
@@ -48,8 +68,22 @@ export function AddJournalEntryModal({
     setErrors(p => ({ ...p, [key]: '' }))
   }
 
+  function handleFileChange(nextFile: File | null) {
+    if (!nextFile) return
+    setFile(nextFile)
+    setErrors(prev => ({ ...prev, file: '' }))
+  }
+
+  function resetAndClose() {
+    setErrors({})
+    setForm(EMPTY_FORM)
+    setFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    onClose()
+  }
+
   async function submit() {
-    const result = AddJournalEntrySchema.safeParse(form)
+    const result = JournalEntryWithFileSchema.safeParse({ ...form, file })
     if (!result.success) {
       setErrors(zodErrors(result.error))
       return
@@ -57,9 +91,10 @@ export function AddJournalEntryModal({
     setErrors({})
     await onSubmit?.(result.data)
     toast.success(`Journal entry "${result.data.title}" saved.`)
-    onClose()
-    setForm(EMPTY_FORM)
+    resetAndClose()
   }
+
+  const hasMissingRequired = !form.title.trim() || !form.author.trim() || !form.date.trim() || !file
 
   const cls = (f: string) =>
     `w-full px-3 py-2.5 border-[1.5px] rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-blue-500 focus:bg-white transition ${
@@ -67,7 +102,7 @@ export function AddJournalEntryModal({
     }`
 
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-lg">
+    <Modal open={open} onClose={resetAndClose} title={title} width="max-w-lg">
       <div className="p-6 space-y-4">
 
         <div>
@@ -105,6 +140,54 @@ export function AddJournalEntryModal({
         </div>
 
         <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">
+            Attachment <span className="text-red-500">*</span>
+          </label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+            className="hidden"
+            onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
+          />
+
+          {file ? (
+            <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-[1.5px] border-blue-200 rounded-xl">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-2xl flex-shrink-0">📎</span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
+                  <p className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setFile(null)
+                  if (fileInputRef.current) fileInputRef.current.value = ''
+                }}
+                className="text-slate-400 hover:text-red-500 font-bold text-sm ml-3 flex-shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
+                errors.file ? 'border-red-400 bg-red-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+              }`}
+            >
+              <div className="mb-1.5 flex justify-center text-blue-600">
+                <Paperclip size={28} strokeWidth={2.1} />
+              </div>
+              <p className="text-sm font-medium text-slate-600 mb-0.5">Attach file</p>
+              <p className="text-xs text-slate-400">PDF, DOCX, XLSX, JPG — max 50 MB</p>
+            </div>
+          )}
+          {errors.file && <p className="text-xs text-red-500 mt-1 font-medium">⚠ {errors.file}</p>}
+        </div>
+
+        <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Content</label>
           <textarea rows={4} className={`${cls('content')} resize-none`}
             placeholder="Enter the full content of this journal entry…"
@@ -113,8 +196,8 @@ export function AddJournalEntryModal({
         </div>
 
         <div className="flex justify-end gap-2.5 pt-1">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>{submitLabel}</Button>
+          <Button variant="outline" onClick={resetAndClose}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={hasMissingRequired}>{submitLabel}</Button>
         </div>
       </div>
     </Modal>
