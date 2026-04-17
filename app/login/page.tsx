@@ -75,7 +75,7 @@ export default function LoginPage() {
             className="w-12 h-12 rounded-full bg-white object-contain"
           />
           <span className="text-[#fde047] font-serif text-lg leading-tight font-medium tracking-wide">
-            Davao Norte Police Provincial<br />Office
+            Davao Norte Police Provincial Office
           </span>
         </div>
 
