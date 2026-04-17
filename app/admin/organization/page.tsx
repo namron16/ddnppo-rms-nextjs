@@ -876,6 +876,99 @@ export default function OrganizationPage() {
     setPan(getCenteredPan(1))
   }
 
+  function handlePrintChart() {
+    const svg = canvasRef.current?.querySelector('svg') as SVGSVGElement | null
+    if (!svg) {
+      toast.error('Nothing to print yet.')
+      return
+    }
+
+    const popup = window.open('', '_blank', 'width=1400,height=900')
+    if (!popup) {
+      toast.error('Please allow popups to print the chart.')
+      return
+    }
+
+    const viewBox = svg.viewBox.baseVal
+    const chartWidth = viewBox?.width || svg.clientWidth || 1
+    const chartHeight = viewBox?.height || svg.clientHeight || 1
+    const pageWidthPx = 11 * 96 - 2 * (12 / 25.4) * 96
+    const pageHeightPx = 8.5 * 96 - 2 * (12 / 25.4) * 96
+    const headerHeightPx = 72
+    const scale = Math.min(1, pageWidthPx / chartWidth, (pageHeightPx - headerHeightPx) / chartHeight)
+    const printWidth = Math.max(1, Math.floor(chartWidth * scale))
+    const printHeight = Math.max(1, Math.floor(chartHeight * scale))
+    const serializedSvg = new XMLSerializer().serializeToString(svg)
+    const title = document.title || 'Organizational Chart'
+
+    popup.document.open()
+    popup.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${title}</title>
+          <meta charset="utf-8" />
+          <style>
+            @page { size: landscape; margin: 12mm; }
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: #fff;
+              color: #0f172a;
+              font-family: Inter, Arial, sans-serif;
+              width: 100%;
+              height: 100%;
+              overflow: hidden;
+            }
+            body {
+              padding: 10px 12px 12px;
+              box-sizing: border-box;
+            }
+            .print-header {
+              margin-bottom: 10px;
+              break-inside: avoid;
+            }
+            .print-title {
+              margin: 0;
+              font-size: 18px;
+              font-weight: 800;
+            }
+            .print-subtitle {
+              margin: 4px 0 0;
+              font-size: 11px;
+              color: #475569;
+            }
+            .print-chart {
+              width: ${printWidth}px;
+              height: ${printHeight}px;
+              overflow: hidden;
+              break-inside: avoid;
+            }
+            svg {
+              display: block;
+              width: ${printWidth}px;
+              height: ${printHeight}px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-header">
+            <h1 class="print-title">${title}</h1>
+            <p class="print-subtitle">Generated on ${new Date().toLocaleString()} · Scaled to fit one page</p>
+          </div>
+          <div class="print-chart">${serializedSvg}</div>
+        </body>
+      </html>
+    `)
+    popup.document.close()
+    popup.focus()
+
+    popup.onload = () => {
+      popup.print()
+      popup.onafterprint = () => popup.close()
+    }
+  }
+
   function onWheel(e: React.WheelEvent) {
     if (!isLayoutEdit) return
     e.preventDefault()
@@ -924,6 +1017,10 @@ export default function OrganizationPage() {
       <div className="flex items-center gap-2.5 px-8 py-3 bg-white border-b border-slate-200 sticky top-14 z-40 flex-wrap">
         <Button variant="primary" size="sm" onClick={() => openAddModal()}>
           ✚ Add Member
+        </Button>
+
+        <Button variant="outline" size="sm" onClick={handlePrintChart} disabled={members.length === 0}>
+          🖨 Print Chart
         </Button>
 
         <button
