@@ -743,6 +743,16 @@ export default function MasterPage() {
     ? currentAttachmentEntry.att
     : null
 
+  const previousAttachmentEntry = attachmentNavStack.length > 1
+    ? attachmentNavStack[attachmentNavStack.length - 2]
+    : null
+
+  const backLabel = !previousAttachmentEntry
+    ? 'Document'
+    : previousAttachmentEntry.kind === 'document'
+      ? previousAttachmentEntry.doc.title
+      : previousAttachmentEntry.att.file_name
+
   function handleSelectDocument(doc: DocEnriched) {
     setSelection(doc)
     setAttachmentNavStack([{ kind: 'document', doc }])
@@ -911,6 +921,22 @@ export default function MasterPage() {
                   </div>
                 ) : (
                   <div className="animate-fade-up space-y-5">
+
+                  {/* Back Button */}
+                  {attachmentNavStack.length > 1 && (
+                    <button
+                      onClick={() => handleNavigateTo(attachmentNavStack.length - 2)}
+                      className="inline-flex items-center gap-2 mb-4 px-4 py-2 bg-white border-2 border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md self-start"
+                    >
+                      <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                      </svg>
+                      <span>
+                        Back to{' '}
+                        <span className="font-bold">{backLabel}</span>
+                      </span>
+                    </button>
+                  )}
 
                   {/* Document header */}
                   <div className="flex items-start justify-between gap-4">
@@ -1083,32 +1109,6 @@ export default function MasterPage() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {attachmentNavStack.length > 1 && (
-                          (() => {
-                            const previousEntry = attachmentNavStack[attachmentNavStack.length - 2]
-                            const backLabel = !previousEntry
-                              ? 'Document'
-                              : previousEntry.kind === 'document'
-                                ? previousEntry.doc.title
-                                : previousEntry.att.file_name
-
-                            return (
-                          <button
-                            onClick={() => handleNavigateTo(attachmentNavStack.length - 2)}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-white border-2 border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md"
-                          >
-                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-                            </svg>
-                            <span>
-                              Back to{' '}
-                              <span className="font-bold">{backLabel}</span>
-                            </span>
-                          </button>
-                            )
-                          })()
-                        )}
-
                         {uploadingId && (
                           <span className="flex items-center gap-1.5 text-xs text-blue-600 font-medium bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
                             <span className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin block" />
