@@ -1084,12 +1084,29 @@ export default function MasterPage() {
 
                       <div className="flex items-center gap-2">
                         {attachmentNavStack.length > 1 && (
+                          (() => {
+                            const previousEntry = attachmentNavStack[attachmentNavStack.length - 2]
+                            const backLabel = !previousEntry
+                              ? 'Document'
+                              : previousEntry.kind === 'document'
+                                ? previousEntry.doc.title
+                                : previousEntry.att.file_name
+
+                            return (
                           <button
                             onClick={() => handleNavigateTo(attachmentNavStack.length - 2)}
-                            className="text-xs px-2.5 py-1 bg-white border border-slate-300 text-slate-600 rounded-md hover:bg-slate-100 transition"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-white border-2 border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md"
                           >
-                            ← Back
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                            </svg>
+                            <span>
+                              Back to{' '}
+                              <span className="font-bold">{backLabel}</span>
+                            </span>
                           </button>
+                            )
+                          })()
                         )}
 
                         {uploadingId && (
