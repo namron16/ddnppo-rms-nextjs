@@ -10,7 +10,7 @@ import type { OrgNode } from '@/types'
 // Layout constants
 // ─────────────────────────────────────────────
 const CARD_W   = 160
-const CARD_H   = 64
+const CARD_H   = 84
 const H_GAP    = 24
 const V_GAP    = 56
 const CONN_CLR = '#94a3b8'
@@ -114,13 +114,27 @@ function buildTree(
   els.push(
     <text
       key={`title-${key}`}
-      x={cardX + 54} y={y + 52}
+      x={cardX + 54} y={y + 48}
       textAnchor="start" dominantBaseline="central"
       fill="#64748b" fontSize={10} fontWeight={400}
     >
       {node.title.length > 18 ? node.title.slice(0, 17) + '\u2026' : node.title}
     </text>
   )
+
+  // Contact label
+  if (node.contactNo) {
+    els.push(
+      <text
+        key={`contact-${key}`}
+        x={cardX + 54} y={y + 64}
+        textAnchor="start" dominantBaseline="central"
+        fill="#475569" fontSize={10} fontWeight={500}
+      >
+        {node.contactNo.length > 18 ? node.contactNo.slice(0, 17) + '\u2026' : node.contactNo}
+      </text>
+    )
+  }
 
   // ── Connectors + children ────────────────────
   if (node.children && node.children.length > 0) {

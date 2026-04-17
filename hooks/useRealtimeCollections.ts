@@ -258,6 +258,7 @@ interface OrgMember {
   rank: string
   position: string
   unit?: string
+  contactNo?: string
   photoUrl?: string
   initials: string
   color: string
@@ -271,6 +272,7 @@ function normaliseOrgMember(row: any): OrgMember {
     rank: row.rank ?? '',
     position: row.position,
     unit: row.unit ?? undefined,
+    contactNo: row.contact_no ?? undefined,
     photoUrl: row.photo_url ?? undefined,
     initials: row.initials,
     color: row.color,

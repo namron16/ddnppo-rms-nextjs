@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS public.org_members (
   rank TEXT,
   position TEXT NOT NULL,
   unit TEXT,
+  contact_no TEXT,
   photo_url TEXT,
   initials TEXT NOT NULL,
   color TEXT NOT NULL,

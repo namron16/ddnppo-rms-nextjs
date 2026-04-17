@@ -84,6 +84,7 @@ export interface OrgNode {
   name: string
   title: string
   unit: string
+  contactNo?: string
   color: string
   children?: OrgNode[]
 }

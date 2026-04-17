@@ -17,6 +17,7 @@ interface OrgMember {
   rank: string
   position: string
   unit?: string
+  contactNo?: string
   photoUrl?: string
   initials: string
   color: string
@@ -29,6 +30,7 @@ type OrgMemberRow = {
   rank: string | null
   position: string
   unit: string | null
+  contact_no: string | null
   photo_url: string | null
   initials: string
   color: string
@@ -141,6 +143,7 @@ function fromDbRow(row: OrgMemberRow): OrgMember {
     rank: row.rank ?? '',
     position: row.position,
     unit: row.unit ?? undefined,
+    contactNo: row.contact_no ?? undefined,
     photoUrl: row.photo_url ?? undefined,
     initials: row.initials,
     color: row.color,
@@ -155,6 +158,7 @@ function toDbRow(member: OrgMember): OrgMemberRow {
     rank: member.rank || null,
     position: member.position,
     unit: member.unit || null,
+    contact_no: member.contactNo || null,
     photo_url: member.photoUrl || null,
     initials: member.initials,
     color: member.color,
@@ -454,9 +458,17 @@ function MemberCard({ node, selected, onClick, onEdit, onDelete, onAddChild }: {
 
       {/* Unit */}
       {member.unit && (
-        <text x={CARD_W / 2} y={member.rank ? 241 : 225} textAnchor="middle"
+        <text x={CARD_W / 2} y={member.rank ? (member.contactNo ? 255 : 241) : (member.contactNo ? 239 : 225)} textAnchor="middle"
           fill="#64748b" fontSize={12} fontWeight={500} fontFamily="Inter, sans-serif">
           {member.unit.length > 30 ? member.unit.slice(0, 29) + '…' : member.unit}
+        </text>
+      )}
+
+      {/* Contact number */}
+      {member.contactNo && (
+        <text x={CARD_W / 2} y={member.rank ? 236 : 220} textAnchor="middle"
+          fill="#475569" fontSize={12} fontWeight={600} fontFamily="Inter, sans-serif">
+          {member.contactNo.length > 24 ? member.contactNo.slice(0, 23) + '…' : member.contactNo}
         </text>
       )}
 
@@ -595,6 +607,7 @@ function MemberModal({ open, onClose, onSave, existing, members, defaultParentId
   const fileRef   = useRef<HTMLInputElement>(null)
   const [form, setForm] = useState({
     name: '', rank: '', position: '', unit: '',
+    contactNo: '',
     color: COLORS[0], photoUrl: '', parentId: '',
   })
   const [preview, setPreview] = useState('')
@@ -603,11 +616,12 @@ function MemberModal({ open, onClose, onSave, existing, members, defaultParentId
     if (!open) return
     if (existing) {
       setForm({ name: existing.name, rank: existing.rank, position: existing.position,
-        unit: existing.unit ?? '', color: existing.color, photoUrl: existing.photoUrl ?? '',
+        unit: existing.unit ?? '', contactNo: existing.contactNo ?? '', color: existing.color, photoUrl: existing.photoUrl ?? '',
         parentId: existing.parentId ?? '' })
       setPreview(existing.photoUrl ?? '')
     } else {
       setForm(f => ({ ...f, name: '', rank: '', position: '', unit: '',
+        contactNo: '',
         color: COLORS[Math.floor(Math.random() * COLORS.length)],
         photoUrl: '', parentId: defaultParentId ?? '' }))
       setPreview('')
@@ -625,7 +639,7 @@ function MemberModal({ open, onClose, onSave, existing, members, defaultParentId
     if (!form.name.trim())     { toast.error('Name is required.'); return }
     if (!form.position.trim()) { toast.error('Position is required.'); return }
     onSave({ name: form.name.trim(), rank: form.rank.trim(), position: form.position.trim(),
-      unit: form.unit.trim(), color: form.color, photoUrl: form.photoUrl || undefined,
+      unit: form.unit.trim(), contactNo: form.contactNo.trim() || undefined, color: form.color, photoUrl: form.photoUrl || undefined,
       initials: getInitials(form.name), parentId: form.parentId || undefined })
     onClose()
   }
@@ -714,6 +728,12 @@ function MemberModal({ open, onClose, onSave, existing, members, defaultParentId
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Unit / Assignment</label>
           <input className={cls} placeholder="e.g. DDNPPO HQ" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
+        </div>
+
+        {/* Contact Number */}
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">Contact Number</label>
+          <input className={cls} placeholder="e.g. 09171234567" value={form.contactNo} onChange={e => setForm(f => ({ ...f, contactNo: e.target.value }))} />
         </div>
 
         <div className="flex justify-end gap-2.5 pt-1">
